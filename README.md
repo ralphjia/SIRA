@@ -122,8 +122,8 @@ vignette("sira-introduction", package = "SIRA")
 A manuscript describing the SIRA methodology is in preparation. In the
 meantime, please cite this software repository directly:
 
-> Your Name (2025). *SIRA: Scalable Image-on-Scalar Regression Algorithm*.
-> R package. https://github.com/yourusername/SIRA
+> Ralph Jiang (2026). *SIRA: Scalable Image-on-Scalar Regression Algorithm*.
+> R package. https://github.com/ralphjia/SIRA
 
 ---
 

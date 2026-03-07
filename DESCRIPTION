@@ -2,7 +2,7 @@ Package: SIRA
 Type: Package
 Title: Scalable Image-on-Scalar Regression Algorithm
 Version: 0.1.0
-Authors@R: person("Your", "Name", email = "you@example.com",
+Authors@R: person("Ralph", "Jiang", email = "ralphjia@umich.edu",
     role = c("aut", "cre"))
 Description: Fits image-on-scalar regression models with spatially homogeneous,
     sparse coefficient images. The Scalable Image-on-Scalar Regression
@@ -17,15 +17,16 @@ Depends:
 Imports:
     Matrix,
     locfdr,
-    pracma
-Suggests:
+    pracma,
     BayesGPfit,
+    Rcpp
+Suggests:
     testthat (>= 3.0.0),
     knitr,
-    rmarkdown
+    rmarkdown,
 LinkingTo:
     Rcpp
 Config/testthat/edition: 3
 VignetteBuilder: knitr
-URL: https://github.com/yourusername/SIRA
-BugReports: https://github.com/yourusername/SIRA/issues
+URL: https://github.com/ralphjia/SIRA
+BugReports: https://github.com/ralphjia/SIRA/issues
