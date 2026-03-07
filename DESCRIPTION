@@ -1,0 +1,31 @@
+Package: SIRA
+Type: Package
+Title: Scalable Image-on-Scalar Regression Algorithm
+Version: 0.1.0
+Authors@R: person("Your", "Name", email = "you@example.com",
+    role = c("aut", "cre"))
+Description: Fits image-on-scalar regression models with spatially homogeneous,
+    sparse coefficient images. The Scalable Image-on-Scalar Regression
+    Algorithm (SIRA) uses a coordinate-descent procedure with five region
+    operations (expand, shrink, revalue, merge, split) and precomputed summary
+    statistics to scale to high-dimensional neuroimaging data.
+License: MIT + file LICENSE
+Encoding: UTF-8
+RoxygenNote: 7.3.1
+Depends:
+    R (>= 4.1.0)
+Imports:
+    Matrix,
+    locfdr,
+    pracma
+Suggests:
+    BayesGPfit,
+    testthat (>= 3.0.0),
+    knitr,
+    rmarkdown
+LinkingTo:
+    Rcpp
+Config/testthat/edition: 3
+VignetteBuilder: knitr
+URL: https://github.com/yourusername/SIRA
+BugReports: https://github.com/yourusername/SIRA/issues

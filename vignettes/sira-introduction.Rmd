@@ -1,0 +1,219 @@
+---
+title: "Introduction to SIRA"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Introduction to SIRA}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment  = "#>"
+)
+```
+
+## Overview
+
+SIRA (Scalable Image-on-Scalar Regression Algorithm) fits image-on-scalar
+regression models of the form:
+
+$$Y_i(s_v) = \sum_{j=1}^{p_1} \beta_j(s_v) X_{ij} + \sum_{k=1}^{p_2} \gamma_k(s_v) Z_{ik} + \eta_i(s_v) + \epsilon_i(s_v)$$
+
+where:
+
+- $Y_i(s_v)$ is subject $i$'s image value at voxel $v$
+- $X_{ij}$ are covariates of interest with spatially-varying coefficient images $\beta_j$
+- $Z_{ik}$ are confounders (typically including an intercept) with coefficient images $\gamma_k$
+- $\eta_i(s_v) = \theta_i \Psi^*(s_v)$ is a spatial individual effect
+- $\epsilon_i(s_v)$ is noise
+
+SIRA enforces two properties on each $\beta_j$: **sparsity** (most voxels have
+$\beta_j = 0$) and **spatial homogeneity** (nonzero voxels form spatially
+contiguous regions with a constant value). It achieves this via a
+coordinate-descent algorithm with five region operations: revalue, expand,
+shrink, merge, and split.
+
+## A simple example
+
+We begin with a single covariate and a small 10×10×10 image to verify basic
+functionality.
+
+```{r simple-setup}
+library(SIRA)
+
+set.seed(1)
+d1 <- d2 <- d3 <- 10L
+V  <- d1 * d2 * d3
+n  <- 50L
+
+# True signal: a 3x3x3 cube of voxels near the origin with beta = 3
+beta_true        <- numeric(V)
+beta_true[1:27]  <- 3
+
+X <- matrix(rnorm(n), ncol = 1)
+Z <- cbind(1, rnorm(n))
+Y <- X %*% t(beta_true) +
+     Z %*% matrix(rnorm(2 * V), nrow = 2) +
+     matrix(rnorm(n * V, sd = 3), nrow = n)
+```
+
+```{r simple-fit}
+fit <- sira(Y = Y, X = X, Z = Z,
+            d1 = d1, d2 = d2, d3 = d3,
+            lambda = 0.3, mu = 0.1)
+print(fit)
+```
+
+We can check how well SIRA recovered the true signal region:
+
+```{r simple-check}
+recovered   <- which(fit$betahat[1, ] != 0)
+true_voxels <- which(beta_true != 0)
+
+cat("True positives :", length(intersect(recovered, true_voxels)),
+    "of", length(true_voxels), "\n")
+cat("False positives:", length(setdiff(recovered, true_voxels)), "\n")
+```
+
+With a small sample (n=50) and high noise (sd=3), SIRA recovers a conservative
+subset of the true region. Importantly, all recovered voxels are true signal —
+there are no false positives.
+
+## A more challenging example
+
+Here we fit a model with two covariates, each having two spatially separated
+regions with opposite signs. This tests that SIRA correctly handles multiple
+covariates, positive and negative regions, and that the two coefficient images
+do not interfere with each other.
+
+```{r hard-setup}
+set.seed(42)
+n <- 200L
+
+# Helper: linear voxel indices for a 3D box in column-major order
+box <- function(i1r, i2r, i3r) {
+  as.integer(unlist(lapply(i3r, function(k)
+    unlist(lapply(i2r, function(j)
+      i1r + d1 * (j - 1L) + d1 * d2 * (k - 1L))))))
+}
+
+# Beta 1: positive cube near (1,1,1), negative cube near (8,8,8)
+# Beta 2: positive cube near (1,8,1), negative cube near (8,1,8)
+# All four regions are fully separated (gap >= 4 voxels on every axis).
+regions <- list(
+  b1_pos = list(vox = box(1:3, 1:3,   1:3),   val =  2.5),
+  b1_neg = list(vox = box(8:10, 8:10, 8:10),  val = -2.5),
+  b2_pos = list(vox = box(1:3, 8:10,  1:3),   val =  2.0),
+  b2_neg = list(vox = box(8:10, 1:3,  8:10),  val = -2.0)
+)
+
+beta_true2 <- matrix(0, nrow = 2, ncol = V)
+beta_true2[1, regions$b1_pos$vox] <-  2.5
+beta_true2[1, regions$b1_neg$vox] <- -2.5
+beta_true2[2, regions$b2_pos$vox] <-  2.0
+beta_true2[2, regions$b2_neg$vox] <- -2.0
+
+X2 <- matrix(rnorm(n * 2), ncol = 2)
+Z2 <- cbind(1, rnorm(n))
+Y2 <- X2 %*% beta_true2 +
+      Z2 %*% matrix(rnorm(2 * V), nrow = 2) +
+      matrix(rnorm(n * V, sd = 2), nrow = n)
+```
+
+```{r hard-fit}
+fit2 <- sira(Y = Y2, X = X2, Z = Z2,
+             d1 = d1, d2 = d2, d3 = d3,
+             lambda = 0.3, mu = 0.1)
+print(fit2)
+```
+
+```{r hard-check}
+check_covariate <- function(j, true_pos, true_neg) {
+  bhat     <- fit2$betahat[j, ]
+  rec      <- which(bhat != 0)
+  pos_rec  <- rec[bhat[rec] > 0]
+  neg_rec  <- rec[bhat[rec] < 0]
+  all_true <- c(true_pos, true_neg)
+
+  cat(sprintf("Covariate %d:\n", j))
+  cat(sprintf("  Regions found   : %d  (expected 2)\n",
+              length(fit2$region_list[[j]])))
+  cat(sprintf("  Positive region : %d voxels, mean beta = %.3f  (true beta = %.1f)\n",
+              length(pos_rec),
+              if (length(pos_rec) > 0) mean(bhat[pos_rec]) else NA,
+              beta_true2[j, true_pos[1]]))
+  cat(sprintf("  Negative region : %d voxels, mean beta = %.3f  (true beta = %.1f)\n",
+              length(neg_rec),
+              if (length(neg_rec) > 0) mean(bhat[neg_rec]) else NA,
+              beta_true2[j, true_neg[1]]))
+  cat(sprintf("  True positives  : %d / %d (%.0f%%)\n",
+              length(intersect(rec, all_true)), length(all_true),
+              100 * length(intersect(rec, all_true)) / length(all_true)))
+  cat(sprintf("  False positives : %d\n\n",
+              length(setdiff(rec, all_true))))
+}
+
+check_covariate(1, regions$b1_pos$vox, regions$b1_neg$vox)
+check_covariate(2, regions$b2_pos$vox, regions$b2_neg$vox)
+```
+
+Both coefficient images are recovered with the correct region structure (2
+regions each), correct signs, and no false positives. The estimated beta values
+are attenuated relative to the truth due to the L1 penalty (`mu`) and partial
+absorption of signal by the spatial random effects term — this is expected
+behaviour and can be reduced by lowering `mu`.
+
+## Extracting results
+
+The fitted coefficient images can be extracted and reshaped into 3D arrays for
+visualisation:
+
+```{r extract}
+# Extract the p1 x V betahat matrix
+beta_mat <- coef(fit2, type = "beta")   # 2 x 1000
+
+# Reshape row 1 into a 10 x 10 x 10 array
+beta1_array <- as.array(fit2, j = 1)
+dim(beta1_array)
+
+# A simple slice through the first axis
+beta1_array[1, , ]
+```
+
+## Irregular and brain-masked data
+
+When voxels do not sit on a rectangular grid — for example, when `Y` contains
+only grey-matter masked voxels from a brain atlas — pass a V x 3 matrix of
+spatial coordinates instead of `d1`, `d2`, `d3`:
+
+```{r coords-example, eval = FALSE}
+# coords is a V x 3 matrix of (x, y, z) MNI coordinates (in mm or voxels)
+fit_masked <- sira(Y = Y_masked, X = X, Z = Z,
+                   coords = mni_coords,
+                   lambda = 0.3, mu = 0.1)
+```
+
+SIRA determines adjacency automatically: two voxels are 6-connected neighbours
+if they differ by exactly one voxel spacing along one axis and are coincident
+on the other two. The spacing is detected from the minimum gap between unique
+coordinate values on each axis, so both millimetre and voxel-index coordinates
+work without any manual scaling.
+
+All downstream code (`print`, `coef`, `summary`) works identically. The only
+difference is that `as.array()` is not available for masked fits (since there
+is no rectangular grid to reshape into), so use `coef()` to extract the
+length-V coefficient vector and map it back to your atlas using your own
+masking index.
+
+## Tuning parameters
+
+SIRA has two tuning parameters:
+
+- **`lambda`** controls spatial smoothness. Larger values encourage larger,
+  blockier regions by penalising boundaries more heavily.
+- **`mu`** controls sparsity. Larger values produce fewer nonzero voxels.
+
+Both can be selected by cross-validation or by inspecting the convergence
+behaviour across a grid of values.
