@@ -44,9 +44,9 @@ library(SIRA)
 set.seed(1)
 d1 <- d2 <- d3 <- 10L
 V  <- d1 * d2 * d3
-n  <- 100L
+n  <- 50L
 
-# True signal: a small cube of voxels with beta = 3, rest zero
+# True signal: a 3x3x3 cube of voxels near the origin with beta = 3
 beta_true        <- numeric(V)
 beta_true[1:27]  <- 3
 
@@ -54,14 +54,14 @@ X <- matrix(rnorm(n), ncol = 1)
 Z <- cbind(1, rnorm(n))
 Y <- X %*% t(beta_true) +
      Z %*% matrix(rnorm(2 * V), nrow = 2) +
-     matrix(rnorm(n * V, sd = 2), nrow = n)
+     matrix(rnorm(n * V, sd = 3), nrow = n)
 
 # Y : n x V matrix of subject images (vectorised, column-major)
 # X : n x p1 matrix of covariates of interest
 # Z : n x p2 matrix of confounders (include a column of 1s for the intercept)
 fit <- sira(Y = Y, X = X, Z = Z,
             d1 = d1, d2 = d2, d3 = d3,
-            lambda = 0.3, mu = 0.1)
+            lambda = 0.05, mu = 0.01)
 
 print(fit)
 ```
@@ -84,7 +84,7 @@ coordinates instead of `d1/d2/d3`:
 # coords : V x 3 numeric matrix of (x, y, z) spatial coordinates
 fit <- sira(Y = Y, X = X, Z = Z,
             coords = coords,
-            lambda = 0.3, mu = 0.1)
+            lambda = 0.05, mu = 0.01)
 ```
 
 SIRA infers adjacency from the coordinate spacing — two voxels are neighbours
@@ -125,7 +125,7 @@ fit <- sira_batched(
   Y_reader = readRDS,   # or a custom reader for HDF5, CSV, etc.
   X = X, Z = Z,
   d1 = d1, d2 = d2, d3 = d3,
-  lambda = 0.3, mu = 0.1
+  lambda = 0.05, mu = 0.01
 )
 ```
 

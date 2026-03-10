@@ -62,7 +62,7 @@ Y <- X %*% t(beta_true) +
 ```{r simple-fit}
 fit <- sira(Y = Y, X = X, Z = Z,
             d1 = d1, d2 = d2, d3 = d3,
-            lambda = 0.3, mu = 0.1)
+            lambda = 0.05, mu = 0.01)
 print(fit)
 ```
 
@@ -77,9 +77,8 @@ cat("True positives :", length(intersect(recovered, true_voxels)),
 cat("False positives:", length(setdiff(recovered, true_voxels)), "\n")
 ```
 
-With a small sample (n=50) and high noise (sd=3), SIRA recovers a conservative
-subset of the true region. Importantly, all recovered voxels are true signal —
-there are no false positives.
+With a small sample (n=50) and high noise (sd=3), SIRA recovers all 27 true
+signal voxels with no false positives.
 
 ## A more challenging example
 
@@ -125,7 +124,7 @@ Y2 <- X2 %*% beta_true2 +
 ```{r hard-fit}
 fit2 <- sira(Y = Y2, X = X2, Z = Z2,
              d1 = d1, d2 = d2, d3 = d3,
-             lambda = 0.3, mu = 0.1)
+             lambda = 0.05, mu = 0.01)
 print(fit2)
 ```
 
@@ -163,12 +162,12 @@ Both coefficient images are recovered with the correct region structure (2
 regions each), correct signs, and no false positives. The estimated beta values
 are attenuated relative to the truth due to the L1 penalty (`mu`) and partial
 absorption of signal by the spatial random effects term — this is expected
-behaviour and can be reduced by lowering `mu`.
+behavior and can be reduced by lowering `mu`.
 
 ## Extracting results
 
 The fitted coefficient images can be extracted and reshaped into 3D arrays for
-visualisation:
+visualization:
 
 ```{r extract}
 # Extract the p1 x V betahat matrix
@@ -192,7 +191,7 @@ spatial coordinates instead of `d1`, `d2`, `d3`:
 # coords is a V x 3 matrix of (x, y, z) MNI coordinates (in mm or voxels)
 fit_masked <- sira(Y = Y_masked, X = X, Z = Z,
                    coords = mni_coords,
-                   lambda = 0.3, mu = 0.1)
+                   lambda = 0.05, mu = 0.01)
 ```
 
 SIRA determines adjacency automatically: two voxels are 6-connected neighbours
@@ -212,8 +211,8 @@ masking index.
 SIRA has two tuning parameters:
 
 - **`lambda`** controls spatial smoothness. Larger values encourage larger,
-  blockier regions by penalising boundaries more heavily.
+  blockier regions by penalizing boundaries more heavily.
 - **`mu`** controls sparsity. Larger values produce fewer nonzero voxels.
 
 Both can be selected by cross-validation or by inspecting the convergence
-behaviour across a grid of values.
+behavior across a grid of values.
