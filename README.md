@@ -3,8 +3,7 @@
 SIRA fits voxelwise image-on-scalar regression models where the coefficient
 images are **sparse** (most voxels have no effect) and **spatially
 homogeneous** (nonzero voxels form contiguous regions with a constant value).
-It is designed to scale to high-dimensional neuroimaging data such as
-whole-brain VBM or fMRI contrast maps.
+It is designed to scale to high-dimensional neuroimaging data.
 
 ---
 
@@ -15,7 +14,7 @@ For subject $i$ at voxel $v$:
 $$Y_i(s_v) = \sum_{j=1}^{p_1} \beta_j(s_v) \, X_{ij} + \sum_{k=1}^{p_2} \gamma_k(s_v) \, Z_{ik} + \eta_i(s_v) + \epsilon_i(s_v)$$
 
 - **$X$** — covariates of interest (e.g. age, diagnosis, cognitive score)
-- **$Z$** — confounders, typically including an intercept (e.g. sex, scanner site, TIV)
+- **$Z$** — confounders, typically including an intercept
 - **$\beta_j$** — spatially sparse, piecewise-constant coefficient images (the primary output)
 - **$\eta_i$** — subject-level spatial random effect, modelled via a GP basis
 - **$\epsilon_i$** — independent noise
@@ -32,7 +31,7 @@ Sparsity and spatial homogeneity are jointly enforced via an L1 penalty
 install.packages(c("Matrix", "locfdr", "pracma", "BayesGPfit", "Rcpp"))
 
 # Install SIRA from source
-devtools::install_github("yourusername/SIRA")
+devtools::install_github("ralphjia/SIRA")
 ```
 
 ---
@@ -42,12 +41,26 @@ devtools::install_github("yourusername/SIRA")
 ```r
 library(SIRA)
 
+set.seed(1)
+d1 <- d2 <- d3 <- 10L
+V  <- d1 * d2 * d3
+n  <- 100L
+
+# True signal: a small cube of voxels with beta = 3, rest zero
+beta_true        <- numeric(V)
+beta_true[1:27]  <- 3
+
+X <- matrix(rnorm(n), ncol = 1)
+Z <- cbind(1, rnorm(n))
+Y <- X %*% t(beta_true) +
+     Z %*% matrix(rnorm(2 * V), nrow = 2) +
+     matrix(rnorm(n * V, sd = 2), nrow = n)
+
 # Y : n x V matrix of subject images (vectorised, column-major)
 # X : n x p1 matrix of covariates of interest
 # Z : n x p2 matrix of confounders (include a column of 1s for the intercept)
-
 fit <- sira(Y = Y, X = X, Z = Z,
-            d1 = 91, d2 = 109, d3 = 91,   # MNI 2mm grid
+            d1 = d1, d2 = d2, d3 = d3,
             lambda = 0.3, mu = 0.1)
 
 print(fit)
@@ -60,7 +73,22 @@ The two key tuning parameters are:
 | `lambda`  | Spatial smoothness | Larger, blockier regions |
 | `mu`      | Sparsity | Fewer nonzero voxels |
 
-A good starting point for whole-brain VBM data is `lambda = 0.3, mu = 0.1`.
+---
+
+## Irregular and brain-masked data
+
+For brain-masked or irregularly spaced data, pass a V x 3 matrix of voxel
+coordinates instead of `d1/d2/d3`:
+
+```r
+# coords : V x 3 numeric matrix of (x, y, z) spatial coordinates
+fit <- sira(Y = Y, X = X, Z = Z,
+            coords = coords,
+            lambda = 0.3, mu = 0.1)
+```
+
+SIRA infers adjacency from the coordinate spacing — two voxels are neighbours
+if they are one voxel-width apart along exactly one axis.
 
 ---
 
@@ -82,12 +110,12 @@ fit$convergence
 
 ---
 
-## Large datasets (UK Biobank and similar)
+## Large datasets
 
-When $n$ is large enough that the full $n \times V$ matrix cannot be held in
-memory, use `sira_batched()`. Instead of passing `Y` directly, provide a
-character vector of file paths — each file is read once, used to accumulate
-summary statistics, and then discarded.
+When the full $n \times V$ matrix cannot be held in memory, use
+`sira_batched()`. Instead of passing `Y` directly, provide a character vector
+of file paths — each file is read once, used to accumulate summary statistics,
+and then discarded.
 
 ```r
 # Y is split into batch files, e.g. ~700 subjects per file
@@ -96,7 +124,7 @@ fit <- sira_batched(
                         full.names = TRUE),
   Y_reader = readRDS,   # or a custom reader for HDF5, CSV, etc.
   X = X, Z = Z,
-  d1 = 91, d2 = 109, d3 = 91,
+  d1 = d1, d2 = d2, d3 = d3,
   lambda = 0.3, mu = 0.1
 )
 ```
