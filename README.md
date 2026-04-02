@@ -115,14 +115,15 @@ fit$convergence
 When the full $n \times V$ matrix cannot be held in memory, use
 `sira_batched()`. Instead of passing `Y` directly, provide a character vector
 of file paths — each file is read once, used to accumulate summary statistics,
-and then discarded.
+and then discarded. An example with reading NIfTI batch files is given in the 
+vignette. 
 
 ```r
 # Y is split into batch files, e.g. ~700 subjects per file
 fit <- sira_batched(
   Y_files  = list.files("path/to/batches", pattern = "\\.rds$",
                         full.names = TRUE),
-  Y_reader = readRDS,   # or a custom reader for HDF5, CSV, etc.
+  Y_reader = readRDS,   # or a custom reader
   X = X, Z = Z,
   d1 = d1, d2 = d2, d3 = d3,
   lambda = 0.05, mu = 0.01

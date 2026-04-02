@@ -164,6 +164,54 @@ are attenuated relative to the truth due to the L1 penalty (`mu`) and partial
 absorption of signal by the spatial random effects term — this is expected
 behavior and can be reduced by lowering `mu`.
 
+## Reading NIfTI batch files
+
+`sira_batched()` accepts any file format via the `Y_reader` argument. For
+NIfTI files (`.nii` or `.nii.gz`), each batch file is typically stored as a
+4D array (d1 × d2 × d3 × n_subjects). The reader needs to reshape this into
+the n_b × V matrix that `sira_batched()` expects:
+
+```{r nifti-example, eval = FALSE}
+library(RNifti)
+
+# Custom reader: reads a 4D NIfTI and returns an n_b x V matrix
+nifti_reader <- function(path) {
+  img <- readNifti(path)                      # d1 x d2 x d3 x n_b array
+  n_b <- dim(img)[4]
+  V   <- prod(dim(img)[1:3])
+  matrix(aperm(img, c(4, 1, 2, 3)), nrow = n_b, ncol = V)
+}
+
+# Each .nii.gz file contains one batch of subjects
+fit <- sira_batched(
+  Y_files  = list.files("path/to/batches", pattern = "\\.nii\\.gz$",
+                        full.names = TRUE),
+  Y_reader = nifti_reader,
+  X = X, Z = Z,
+  d1 = d1, d2 = d2, d3 = d3,
+  lambda = 0.05, mu = 0.01
+)
+```
+
+For brain-masked data where each NIfTI contains only the voxels within a mask,
+pair this with the `coords` argument instead of `d1/d2/d3`:
+
+```{r nifti-masked-example, eval = FALSE}
+# coords is a V x 3 matrix of (x, y, z) coordinates for the masked voxels
+fit_masked <- sira_batched(
+  Y_files  = list.files("path/to/batches", pattern = "\\.nii\\.gz$",
+                        full.names = TRUE),
+  Y_reader = nifti_reader,
+  X = X, Z = Z,
+  coords = mni_coords,
+  lambda = 0.05, mu = 0.01
+)
+```
+
+Install `RNifti` with `install.packages("RNifti")`. Other NIfTI readers such
+as `oro.nifti::readNIfTI()` or `neurobase::readnii()` work equally well —
+just adjust the reader function to return an n_b × V numeric matrix.
+
 ## Extracting results
 
 The fitted coefficient images can be extracted and reshaped into 3D arrays for
