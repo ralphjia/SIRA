@@ -16,7 +16,6 @@ Depends:
     R (>= 4.1.0)
 Imports:
     Matrix,
-    locfdr,
     pracma,
     BayesGPfit,
     Rcpp

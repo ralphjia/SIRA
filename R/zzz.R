@@ -14,7 +14,6 @@
 "_PACKAGE"
 
 #' @importFrom Matrix Matrix sparseMatrix Diagonal rowSums
-#' @importFrom locfdr locfdr
 #' @useDynLib SIRA, .registration = TRUE
 #' @importFrom Rcpp sourceCpp
 NULL
