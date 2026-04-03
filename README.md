@@ -11,7 +11,7 @@ It is designed to scale to high-dimensional neuroimaging data.
 
 For subject $i$ at voxel $v$:
 
-$$Y_i(s_v) = \sum_{j=1}^{p_1} \beta_j(s_v) \, X_{ij} + \sum_{k=1}^{p_2} \gamma_k(s_v) \, Z_{ik} + \eta_i(s_v) + \epsilon_i(s_v)$$
+$$Y_i(s_v) = \sum_{j=1}^{p_1} \beta_j(s_v) X_{ij} + \sum_{k=1}^{p_2} \gamma_k(s_v) Z_{ik} + \eta_i(s_v) + \epsilon_i(s_v)$$
 
 - **$X$** — covariates of interest (e.g. age, diagnosis, cognitive score)
 - **$Z$** — confounders, typically including an intercept
