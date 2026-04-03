@@ -54,9 +54,16 @@ d1 <- d2 <- d3 <- 10L
 V  <- d1 * d2 * d3
 n  <- 50L
 
+# Helper: linear voxel indices for a 3D box in column-major order
+box <- function(i1r, i2r, i3r, d1, d2) {
+  as.integer(unlist(lapply(i3r, function(k)
+    unlist(lapply(i2r, function(j)
+      i1r + d1 * (j - 1L) + d1 * d2 * (k - 1L))))))
+}
+
 # True signal: a 3x3x3 cube of voxels near the origin with beta = 3
-beta_true        <- numeric(V)
-beta_true[1:27]  <- 3
+beta_true <- numeric(V)
+beta_true[box(1:3, 1:3, 1:3, d1, d2)] <- 3
 
 X <- matrix(rnorm(n), ncol = 1)
 Z <- cbind(1, rnorm(n))
@@ -69,7 +76,7 @@ Y <- X %*% t(beta_true) +
 # Z : n x p2 matrix of confounders (include a column of 1s for the intercept)
 fit <- sira(Y = Y, X = X, Z = Z,
             d1 = d1, d2 = d2, d3 = d3,
-            lambda = 0.05, mu = 0.01)
+            lambda = 0.3, mu = 0.2)
 
 print(fit)
 ```

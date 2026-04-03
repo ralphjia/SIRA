@@ -130,12 +130,12 @@
 
 #' @keywords internal
 .sira_initialize_one_covariate <- function(j, env) {
-  # Section 2.5 in the paper:
+  # Mirror the original implementation:
   #   1. Compute the MUA solution and corresponding t-values.
-  #   2. Smooth the t-values.
-  #   3. Run locfdr on the smoothed t-values.
-  #   4. Positive and negative selected voxels become the initial regions.
-  #   5. If locfdr selects nothing, use the top and bottom 2% instead.
+  #   2. Smooth the t-values twice.
+  #   3. Run locfdr with explicit settings.
+  #   4. If nothing is selected, use the top and bottom 2%.
+  #   5. Form one positive and one negative starting region when available.
 
   V   <- env$V
   df  <- env$n - env$p1 - env$p2
@@ -152,6 +152,7 @@
   t_values   <- beta_j / pmax(se_beta_j, 1e-10)
 
   smoothed_t <- as.numeric(sm %*% t_values)
+  smoothed_t <- as.numeric(sm %*% smoothed_t)
   lfdr_keep  <- .sira_locfdr_select(smoothed_t)
 
   pos_vox <- which(lfdr_keep & smoothed_t > 0)
@@ -197,7 +198,7 @@
   fit <- tryCatch(
     suppressWarnings(
       suppressMessages(
-        locfdr::locfdr(smoothed_t, plot = 0)
+        locfdr::locfdr(smoothed_t, bre = 120, df = 7, nulltype = 1, plot = 0)
       )
     ),
     error = function(e) NULL

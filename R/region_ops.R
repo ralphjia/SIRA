@@ -24,6 +24,7 @@
 #' @keywords internal
 .sira_region_ops_one_covariate <- function(j, region_list, env) {
   updated <- TRUE
+  inner_iter <- 0L
 
   while (updated) {
     updated <- FALSE
@@ -35,9 +36,19 @@
       region_list <- .sira_apply_operation(j, region_list, best_op, env)
       region_list <- .clean_zero_regions(region_list)
       region_list <- .sort_regions_by_beta(region_list)
+      inner_iter <- inner_iter + 1L
+
+      if (inner_iter %% 5L == 0L) {
+        region_list <- .merge_duplicate_regions(region_list, digits = 3L)
+        region_list <- .sort_regions_by_beta(region_list)
+      }
+
       updated <- TRUE
     }
   }
+
+  region_list <- .merge_duplicate_regions(region_list, digits = 3L)
+  region_list <- .sort_regions_by_beta(region_list)
 
   region_list
 }
@@ -231,11 +242,11 @@
     n_vox  <- length(vox)
     if (n_vox < 2L) next
 
-    grad <- .split_gradients(j, vox, env)
-    ord  <- order(grad, decreasing = TRUE)
-    n1   <- ceiling(n_vox / 2)
-    sub1 <- vox[ord[seq_len(n1)]]
-    sub2 <- vox[ord[(n1 + 1L):n_vox]]
+    grad <- .split_gradients(j, vox, betahat, env)
+    halfway <- floor(n_vox / 2)
+    ranks <- rank(grad)
+    sub1 <- vox[which(ranks <= halfway)]
+    sub2 <- vox[which(ranks > halfway)]
     if (length(sub1) == 0L || length(sub2) == 0L) next
 
     opt <- .optimize_split_values(j, sub1, sub2, beta_k, betahat, env)
@@ -255,60 +266,77 @@
 }
 
 #' @keywords internal
-.split_gradients <- function(j, vox, env) {
-  2 * (env$XTXB[vox, j] - env$XTY_tilde[j, vox]) / env$n
+.split_gradients <- function(j, vox, betahat, env) {
+  vapply(vox, function(v) {
+    total <- 2 * (env$XTXB[v, j] - env$XTY_tilde[j, v]) / env$n
+    total <- total + env$lambda *
+      sum(sign(betahat[v] - betahat[env$neighbor_list[[v]]]))
+    total <- total + env$mu * sign(betahat[v])
+    total
+  }, numeric(1L))
 }
 
 #' @keywords internal
 .optimize_split_values <- function(j, sub1, sub2, beta_old, betahat, env,
-                                   max_cd_iter = 10L) {
+                                   max_cd_iter = 100L) {
   b1 <- beta_old
   b2 <- beta_old
-  betahat_cur <- betahat
+  starting_betahat <- betahat
+  split_loss_diff <- Inf
+  split_iter <- 0L
 
-  for (iter in seq_len(max_cd_iter)) {
-    changed <- FALSE
+  while (abs(split_loss_diff) > 1e-4 && split_iter <= max_cd_iter) {
+    temp_betahat <- starting_betahat
 
     d1 <- .optimal_region_delta_current(
-      j = j, region_voxels = sub1, current_beta = b1,
-      base_beta = beta_old, betahat_current = betahat_cur, env = env
+      j = j,
+      region_voxels = sub1,
+      current_beta = b1,
+      betahat_current = temp_betahat,
+      env = env
     )
-    if (is.finite(d1) && abs(d1) > 1e-10) {
-      b1 <- b1 + d1
-      betahat_cur[sub1] <- b1
-      changed <- TRUE
-    }
+    b1 <- b1 + d1
+    temp_betahat[sub1] <- b1
 
     d2 <- .optimal_region_delta_current(
-      j = j, region_voxels = sub2, current_beta = b2,
-      base_beta = beta_old, betahat_current = betahat_cur, env = env
+      j = j,
+      region_voxels = sub2,
+      current_beta = b2,
+      betahat_current = temp_betahat,
+      env = env
     )
-    if (is.finite(d2) && abs(d2) > 1e-10) {
-      b2 <- b2 + d2
-      betahat_cur[sub2] <- b2
-      changed <- TRUE
-    }
+    b2 <- b2 + d2
+    temp_betahat[sub2] <- b2
 
-    if (!changed) break
+    split_loss_diff <- .loss_difference(
+      starting_betahat, j, d1, sub1, d2, sub2, env
+    )
+    starting_betahat <- temp_betahat
+    split_iter <- split_iter + 1L
   }
+
+  if (split_iter > max_cd_iter) return(NULL)
+
+  if (abs(b1) < 1e-4) b1 <- 0
+  if (abs(b2) < 1e-4) b2 <- 0
 
   list(b1 = b1, b2 = b2)
 }
 
 #' @keywords internal
 .optimal_region_delta_current <- function(j, region_voxels, current_beta,
-                                          base_beta, betahat_current, env) {
+                                          betahat_current, env) {
   if (length(region_voxels) == 0L) return(0)
 
   region_neighbors <- .get_region_neighbors(region_voxels, env)
-  bq <- .bracket_quadratic_setup_custom(
+  bq <- .bracket_quadratic_setup(
     region_voxels    = region_voxels,
     region_size      = length(region_voxels),
     region_beta      = current_beta,
-    base_beta        = base_beta,
     region_neighbors = region_neighbors,
     betahat          = betahat_current,
     which_beta       = j,
+    XTXB_local       = .xtxb_from_betahat(j, betahat_current, env),
     env              = env
   )
 
@@ -380,62 +408,6 @@
 }
 
 #' @keywords internal
-.bracket_quadratic_setup_custom <- function(region_voxels, region_size,
-                                            region_beta, base_beta,
-                                            region_neighbors, betahat,
-                                            which_beta, env) {
-  nb_size <- length(region_neighbors)
-  n_rows  <- 2L * nb_size + 3L
-
-  coefs <- matrix(0, nrow = n_rows, ncol = 3L)
-  b     <- matrix(0, nrow = n_rows, ncol = 2L)
-
-  lam <- env$lambda
-  mu  <- env$mu
-  n   <- env$n
-
-  if (nb_size > 0L) {
-    nb_diffs <- betahat[region_neighbors] - region_beta
-
-    coefs[seq_len(nb_size), 2L] <- -lam
-    coefs[seq_len(nb_size), 3L] <-  lam * nb_diffs
-
-    rows2 <- nb_size + seq_len(nb_size)
-    coefs[rows2, 2L] <-  lam
-    coefs[rows2, 3L] <- -lam * nb_diffs
-
-    b[seq_len(nb_size),  2L] <-  nb_diffs
-    b[rows2,             1L] <-  nb_diffs
-    b[seq_len(nb_size),  1L] <- -Inf
-    b[rows2,             2L] <-  Inf
-  }
-
-  r1 <- 2L * nb_size + 1L
-  coefs[r1, 2L] <- -mu * region_size
-  coefs[r1, 3L] <- -mu * region_size * region_beta
-  b[r1, 1L]     <- -Inf
-  b[r1, 2L]     <- -region_beta
-
-  r2 <- 2L * nb_size + 2L
-  coefs[r2, 2L] <-  mu * region_size
-  coefs[r2, 3L] <-  mu * region_size * region_beta
-  b[r2, 1L]     <- -region_beta
-  b[r2, 2L]     <-  Inf
-
-  r3 <- 2L * nb_size + 3L
-  xtx_jj    <- region_size * env$XTX_p1[which_beta, which_beta]
-  xty_term  <- sum(env$XTY_tilde[which_beta, region_voxels])
-  xtxb_term <- sum(env$XTXB[region_voxels, which_beta]) +
-    region_size * (region_beta - base_beta) * env$XTX_p1[which_beta, which_beta]
-  coefs[r3, 1L] <- xtx_jj / n
-  coefs[r3, 2L] <- 2 * (xtxb_term - xty_term) / n
-  b[r3, 1L]     <- -Inf
-  b[r3, 2L]     <- Inf
-
-  list(coefs, b)
-}
-
-#' @keywords internal
 .optimal_merge_beta <- function(vox1, vox2, beta1, beta2, j, env) {
   vox_m   <- c(vox1, vox2)
   xtx_jj  <- env$XTX_p1[j, j]
@@ -447,4 +419,12 @@
   self   <- xtx_jj * (length(vox1) * beta1 + length(vox2) * beta2)
 
   (xty_m - xtxb_m + self) / xtx_m
+}
+
+#' @keywords internal
+.xtxb_from_betahat <- function(j, betahat, env) {
+  xj <- env$XTX_p1[j, j]
+  out <- matrix(0, nrow = env$V, ncol = env$p1)
+  out[, j] <- xj * betahat
+  out
 }

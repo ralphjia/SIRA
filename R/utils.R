@@ -61,6 +61,29 @@
   region_list[keep]
 }
 
+#' @keywords internal
+.merge_duplicate_regions <- function(region_list, digits = 3L) {
+  n <- length(region_list)
+  if (n <= 1L) return(region_list)
+
+  betas <- vapply(region_list, `[[`, numeric(1L), 2L)
+  ord   <- order(betas)
+  rl    <- region_list[ord]
+  b_ord <- betas[ord]
+  dup   <- duplicated(round(b_ord, digits))
+
+  i <- length(rl)
+  while (i >= 2L) {
+    if (dup[i]) {
+      rl[[i - 1L]][[1L]] <- c(rl[[i - 1L]][[1L]], rl[[i]][[1L]])
+      rl[[i]] <- NULL
+    }
+    i <- i - 1L
+  }
+
+  rl
+}
+
 # =============================================================================
 # XTXB MANAGEMENT
 # =============================================================================
