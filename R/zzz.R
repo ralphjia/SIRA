@@ -15,5 +15,4 @@
 
 #' @importFrom Matrix Matrix sparseMatrix Diagonal rowSums
 #' @useDynLib SIRA, .registration = TRUE
-#' @importFrom Rcpp sourceCpp
 NULL
