@@ -2,7 +2,7 @@
 % Please edit documentation in R/sira_batched.R
 \name{sira_batched}
 \alias{sira_batched}
-\title{Scalable Image-on-Scalar Regression Algorithm (SIRA) — Batched variant}
+\title{Scalable Image-on-Scalar Regression Algorithm (SIRA) â€” Batched variant}
 \usage{
 sira_batched(
   Y_files,
@@ -22,11 +22,8 @@ sira_batched(
 )
 }
 \arguments{
-\item{Y_files}{Character vector of file paths.  Each file must be readable
-by \code{Y_reader} and return a numeric matrix with \eqn{V} columns.
-Rows (subjects) are assumed to be in the same order as the rows of
-\code{X} and \code{Z}.  The batch sizes (number of rows per file) may
-differ.}
+\item{Y_files}{Character vector of file paths. Each file must be readable by
+\code{Y_reader} and return a numeric matrix with \eqn{V} columns.}
 
 \item{X}{An \eqn{n \times p_1} numeric matrix of covariates of interest.}
 
@@ -52,7 +49,7 @@ for irregular or masked layouts. Supply \code{coords} instead of
 rectangular grid.}
 
 \item{Y_reader}{Function with signature \code{function(path) -> matrix}.
-Default is \code{readRDS}.  Use a custom reader for CSV, HDF5, etc.}
+Default is \code{readRDS}. Use a custom reader for CSV, HDF5, etc.}
 
 \item{Psi_star}{Optional \eqn{L \times V} numeric matrix. Spatial individual
 effects basis computed by \code{BayesGPfit}. If \code{NULL} (default),
@@ -67,34 +64,28 @@ change in \eqn{\hat\alpha} between iterations. Default \code{0.01}.}
 \item{verbose}{Logical. Print progress messages. Default \code{TRUE}.}
 }
 \value{
-An object of class \code{"sira"} — identical structure to the
-  return value of \code{\link{sira}}.
+An object of class \code{"sira"}.
 }
 \description{
 Fits the same model as \code{\link{sira}} but reads the outcome matrix
 \eqn{Y} from disk in batches, so the full \eqn{n \times V} matrix is
-never held in memory simultaneously. The batched implementation uses the
-same MUA plus smoothed-t initialization and the same best-single-operation
-region updates as \code{\link{sira}}, but accumulates the required summary
-statistics one batch at a time.
+never held in memory simultaneously. For repeated fits across many
+\code{(lambda, mu)} combinations, prefer
+\code{\link{sira_batched_preprocess}} followed by
+\code{\link{sira_batched_fit}}.
 }
 \examples{
 \dontrun{
-# Split a large Y matrix into batches and save as RDS files
-batch_size <- 700L
-batches    <- split(seq_len(nrow(Y)),
-                    ceiling(seq_len(nrow(Y)) / batch_size))
-Y_files <- file.path(tempdir(), paste0("Y_batch_", seq_along(batches), ".rds"))
-for (i in seq_along(batches))
-  saveRDS(Y[batches[[i]], ], Y_files[i])
-
-fit <- sira_batched(Y_files = Y_files,
-                    X = X, Z = Z,
-                    d1 = d1, d2 = d2, d3 = d3,
-                    lambda = 0.3, mu = 0.1)
+fit <- sira_batched(
+  Y_files = Y_files,
+  X = X, Z = Z,
+  d1 = d1, d2 = d2, d3 = d3,
+  lambda = 0.3, mu = 0.1
+)
 }
 
 }
 \seealso{
-\code{\link{sira}}
+\code{\link{sira}}, \code{\link{sira_batched_preprocess}},
+  \code{\link{sira_batched_fit}}
 }

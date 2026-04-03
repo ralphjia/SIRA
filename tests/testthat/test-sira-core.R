@@ -129,3 +129,49 @@ test_that("batched fitting matches in-memory fitting on a toy example", {
   expect_equal(fit_batch$gammahat, fit_mem$gammahat, tolerance = 1e-8)
   expect_equal(lengths(fit_batch$region_list), lengths(fit_mem$region_list))
 })
+
+test_that("batched preprocessing can be reused across tuning parameters", {
+  dat <- make_toy_sira_data()
+
+  idx <- split(seq_len(nrow(dat$Y)), c(rep(1L, 12L), rep(2L, 12L)))
+  files <- file.path(tempdir(), paste0("sira-prep-batch-", seq_along(idx), ".rds"))
+  on.exit(unlink(files), add = TRUE)
+  for (i in seq_along(idx)) {
+    saveRDS(dat$Y[idx[[i]], , drop = FALSE], files[i])
+  }
+
+  read_counter <- 0L
+  counting_reader <- function(path) {
+    read_counter <<- read_counter + 1L
+    readRDS(path)
+  }
+
+  prep <- sira_batched_preprocess(
+    Y_files = files,
+    X = dat$X,
+    Z = dat$Z,
+    d1 = dat$d1,
+    d2 = dat$d2,
+    d3 = dat$d3,
+    Y_reader = counting_reader,
+    Psi_star = dat$Psi_star,
+    verbose = FALSE
+  )
+
+  expect_s3_class(prep, "sira_batched_preprocessed")
+  expect_equal(read_counter, length(files))
+
+  fit1 <- sira_batched_fit(
+    prep, lambda = 0.05, mu = 0.01,
+    max_iter = 2L, verbose = FALSE
+  )
+  fit2 <- sira_batched_fit(
+    prep, lambda = 0.3, mu = 0.1,
+    max_iter = 2L, verbose = FALSE
+  )
+
+  expect_equal(read_counter, length(files))
+  expect_s3_class(fit1, "sira")
+  expect_s3_class(fit2, "sira")
+  expect_equal(dim(fit1$betahat), dim(fit2$betahat))
+})
