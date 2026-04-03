@@ -22,6 +22,14 @@ $$Y_i(s_v) = \sum_{j=1}^{p_1} \beta_j(s_v) \, X_{ij} + \sum_{k=1}^{p_2} \gamma_k
 Sparsity and spatial homogeneity are jointly enforced via an L1 penalty
 ($\mu$) and a sum-of-absolute-differences boundary penalty ($\lambda$).
 
+SIRA initializes each coefficient image with a mass-univariate estimate,
+smooths the resulting t-statistics, uses `locfdr` to define positive and
+negative starting regions, and then repeatedly applies the single best
+loss-decreasing region operation among revalue, expand, shrink, merge, and
+split. Merge candidates are restricted to adjacent region values after
+sorting the current regions by coefficient value, and split candidates are
+constructed from voxelwise loss gradients.
+
 ---
 
 ## Installation
@@ -87,7 +95,7 @@ fit <- sira(Y = Y, X = X, Z = Z,
             lambda = 0.05, mu = 0.01)
 ```
 
-SIRA infers adjacency from the coordinate spacing — two voxels are neighbours
+SIRA infers adjacency from the coordinate spacing — two voxels are neighbors
 if they are one voxel-width apart along exactly one axis.
 
 ---

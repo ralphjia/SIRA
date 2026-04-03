@@ -22,7 +22,10 @@
 #'
 #' Fits the same model as \code{\link{sira}} but reads the outcome matrix
 #' \eqn{Y} from disk in batches, so the full \eqn{n \times V} matrix is
-#' never held in memory simultaneously.
+#' never held in memory simultaneously. The batched implementation uses the
+#' same MUA plus smoothed-t initialization and the same best-single-operation
+#' region updates as \code{\link{sira}}, but accumulates the required summary
+#' statistics one batch at a time.
 #'
 #' @param Y_files Character vector of file paths.  Each file must be readable
 #'   by \code{Y_reader} and return a numeric matrix with \eqn{V} columns.
@@ -157,10 +160,9 @@ sira_batched <- function(Y_files, X, Z,
   if (env$verbose) message("[SIRA-batched] Accumulating summary statistics from batches...")
   .sira_setup_summary_stats_batched(env, first_batch)
   # Sets: env$XTX_p1, env$XTY, env$XTZ, env$ZTZ1ZT, env$ZTZ1ZTY,
-  #       env$Y_Psi_starT, env$scaling_matrix_2,
-  #       env$XTY_tilde_0, env$YtY_tilde   (used by batched initialiser)
+  #       env$Y_Psi_starT, env$scaling_matrix_2, env$ZTY_raw, env$YtY
 
-  # ---- 7. Initialisation (uses precomputed stats, no Y needed) ----------
+  # ---- 7. Initialization (uses precomputed stats, no Y needed) ----------
   if (env$verbose) message("[SIRA-batched] Initializing regions (MUA-based)...")
   env$initial_region_list_full <- .sira_initialize_all_regions(env)
 
@@ -227,7 +229,7 @@ sira_batched <- function(Y_files, X, Z,
   # Quantities accumulated across batches (running sums):
   #   XTY      : p1 x V  = t(X) %*% Y
   #   ZTY_raw  : p2 x V  = t(Z) %*% Y   (→ ZTZ1ZTY after the loop)
-  #   YtY      : V       = colSums(Y^2) (for t-stat sigma^2 in initialiser)
+  #   YtY      : V       = colSums(Y^2) (for t-stat sigma^2 in initializer)
   #
   # Assembled row-by-row (manageable n x L):
   #   Y_Psi_starT : n x L = Y %*% t(Psi_star)
@@ -248,7 +250,7 @@ sira_batched <- function(Y_files, X, Z,
   ZTZ1ZT    <- solve(ZTZ, t(Z)) # p2 x n
   env$ZTZ1ZT <- ZTZ1ZT
 
-  # Initialise accumulators
+  # Initialize accumulators
   XTY_acc     <- matrix(0, nrow = p1, ncol = V)
   ZTY_acc     <- matrix(0, nrow = p2, ncol = V)
   YtY_acc     <- numeric(V)
@@ -299,9 +301,11 @@ sira_batched <- function(Y_files, X, Z,
       row_start - 1L, n))
 
   # Finalise confounder terms
-  ZTZ1ZTY        <- solve(ZTZ, ZTY_acc)   # p2 x V
-  env$ZTZ1ZTY    <- ZTZ1ZTY
-  env$ZTZ1ZTX    <- solve(ZTZ, crossprod(Z, X))   # p2 x p1
+  ZTZ1ZTY         <- solve(ZTZ, ZTY_acc)   # p2 x V
+  env$ZTZ1ZTY     <- ZTZ1ZTY
+  env$ZTZ1ZTX     <- solve(ZTZ, crossprod(Z, X))   # p2 x p1
+  env$ZTY_raw     <- ZTY_acc
+  env$YtY         <- YtY_acc
   env$Y_Psi_starT <- Y_Psi_starT
 
   # Finalise scaling matrix for thetahat update
@@ -313,18 +317,6 @@ sira_batched <- function(Y_files, X, Z,
 
   # Store XTY for .sira_update_XTY_tilde
   env$XTY <- XTY_acc   # p1 x V
-
-  # Precompute quantities used by the batched initialiser
-  # (so .sira_initialize_one_covariate never needs Y directly):
-  #
-  #   XTY_tilde_0 = t(X) %*% Y_tilde  where Y_tilde = Y - Z (ZTZ)^{-1} ZT Y
-  #               = XTY - XTZ %*% ZTZ1ZTY
-  #   YtY_tilde   = colSums(Y_tilde^2)
-  #               = YtY - colSums(ZTZ1ZTY * ZTY_raw)
-  #   (uses the identity: P_Z is a projection, so ||Y_tilde||^2 = ||Y||^2 - ||P_Z Y||^2
-  #    and ||P_Z Y||^2_col = colSums(ZTZ1ZTY * ZTY_raw))
-  env$XTY_tilde_0 <- XTY_acc - env$XTZ %*% ZTZ1ZTY    # p1 x V
-  env$YtY_tilde   <- YtY_acc - colSums(ZTZ1ZTY * ZTY_acc)  # length V
 
   if (env$verbose)
     message("  Batched summary statistics done.")

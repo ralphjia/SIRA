@@ -11,13 +11,13 @@ Fits image-on-scalar regression models with spatially homogeneous, sparse coeffi
 \seealso{
 Useful links:
 \itemize{
-  \item \url{https://github.com/yourusername/SIRA}
-  \item Report bugs at \url{https://github.com/yourusername/SIRA/issues}
+  \item \url{https://github.com/ralphjia/SIRA}
+  \item Report bugs at \url{https://github.com/ralphjia/SIRA/issues}
 }
 
 }
 \author{
-\strong{Maintainer}: Your Name \email{you@example.com}
+\strong{Maintainer}: Ralph Jiang \email{ralphjia@umich.edu}
 
 }
 \keyword{internal}

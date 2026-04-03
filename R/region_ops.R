@@ -1,25 +1,19 @@
 # =============================================================================
 # R/region_ops.R
-# The five region operations of the SIRA coordinate-descent algorithm:
+# Region updates for SIRA.
 #
-#   1. revalue  — optimise the scalar beta for each existing region
-#   2. expand   — grow regions by greedily absorbing zero-valued neighbours
-#   3. shrink   — remove boundary voxels whose deletion improves the loss
-#   4. merge    — fuse two adjacent regions into one
-#   5. split    — divide a large region into two connected sub-regions
+# For a single covariate j, Algorithm 2 in the paper repeatedly:
+#   1. Enumerates all candidate region operations.
+#   2. Computes the loss decrease for every candidate.
+#   3. Accepts the single best operation.
+#   4. Repeats until no candidate decreases the loss.
 #
-# Public entry point:
-#   .sira_region_ops_one_covariate(j, region_list, env)
-#     Runs all five operations in sequence for covariate j and returns
-#     the updated region_list.
-#
-# Each operation reads/writes:
-#   env$alphahat_full[j, ]   — the coefficient image for covariate j
-#   env$XTXB[, j]            — incremental XTX*betahat column (utils.R)
-#   env$XTX, env$active_voxels — expanded as new voxels are considered
-#
-# Loss differences are evaluated via .loss_difference() (utils.R).
-# The optimal delta for revalue is found by the C++ bracket_quadratic().
+# The operations are:
+#   - revalue
+#   - expand
+#   - shrink
+#   - merge
+#   - split
 # =============================================================================
 
 
@@ -29,47 +23,71 @@
 
 #' @keywords internal
 .sira_region_ops_one_covariate <- function(j, region_list, env) {
-  # Refresh local betahat before each operation so that incremental XTXB
-  # updates made inside ops are reflected in subsequent ops.
-  betahat <- as.numeric(env$alphahat_full[j, ])
+  updated <- TRUE
 
-  region_list <- .sira_op_revalue(j, region_list, betahat, env)
-  betahat     <- as.numeric(env$alphahat_full[j, ])
+  while (updated) {
+    updated <- FALSE
+    betahat <- as.numeric(env$alphahat_full[j, ])
 
-  region_list <- .sira_op_expand(j, region_list, betahat, env)
-  betahat     <- as.numeric(env$alphahat_full[j, ])
-
-  region_list <- .sira_op_shrink(j, region_list, betahat, env)
-  betahat     <- as.numeric(env$alphahat_full[j, ])
-
-  region_list <- .sira_op_merge(j, region_list, betahat, env)
-  betahat     <- as.numeric(env$alphahat_full[j, ])
-
-  region_list <- .sira_op_split(j, region_list, betahat, env)
-
-  # House-keeping: drop zero regions, collapse duplicates
-  region_list <- .clean_zero_regions(region_list)
-  region_list <- .merge_duplicate_regions(region_list)
+    best_op <- .sira_find_best_operation(j, region_list, betahat, env)
+    if (!is.null(best_op) && is.finite(best_op$loss_diff) &&
+        best_op$loss_diff < -1e-10) {
+      region_list <- .sira_apply_operation(j, region_list, best_op, env)
+      region_list <- .clean_zero_regions(region_list)
+      region_list <- .sort_regions_by_beta(region_list)
+      updated <- TRUE
+    }
+  }
 
   region_list
 }
 
 
 # =============================================================================
-# 1.  REVALUE
-# Finds the optimal scalar shift delta for every region via bracket_quadratic,
-# then accepts the move if the full loss_difference is negative.
+# CANDIDATE SEARCH
 # =============================================================================
 
 #' @keywords internal
-.sira_op_revalue <- function(j, region_list, betahat, env) {
+.sira_find_best_operation <- function(j, region_list, betahat, env) {
+  best_op <- NULL
+
+  best_op <- .better_operation(best_op,
+                               .sira_best_revalue_candidate(j, region_list, betahat, env))
+  best_op <- .better_operation(best_op,
+                               .sira_best_expand_candidate(j, region_list, betahat, env))
+  best_op <- .better_operation(best_op,
+                               .sira_best_shrink_candidate(j, region_list, betahat, env))
+  best_op <- .better_operation(best_op,
+                               .sira_best_merge_candidate(j, region_list, betahat, env))
+  best_op <- .better_operation(best_op,
+                               .sira_best_split_candidate(j, region_list, betahat, env))
+
+  best_op
+}
+
+#' @keywords internal
+.better_operation <- function(current_best, candidate) {
+  if (is.null(candidate)) return(current_best)
+  if (is.null(current_best)) return(candidate)
+  if (candidate$loss_diff < current_best$loss_diff) candidate else current_best
+}
+
+
+# =============================================================================
+# REVALUE
+# =============================================================================
+
+#' @keywords internal
+.sira_best_revalue_candidate <- function(j, region_list, betahat, env) {
+  best <- NULL
+
   for (k in seq_along(region_list)) {
     vox    <- region_list[[k]][[1]]
     beta_k <- region_list[[k]][[2]]
+    if (length(vox) == 0L) next
 
     nb <- .get_region_neighbors(vox, env)
-
-    bq    <- .bracket_quadratic_setup(
+    bq <- .bracket_quadratic_setup(
       region_voxels    = vox,
       region_size      = length(vox),
       region_beta      = beta_k,
@@ -79,338 +97,354 @@
       XTXB_local       = env$XTXB,
       env              = env
     )
-    # C++ bracket_quadratic expects b as a flat vector: lower bounds first,
-    # then upper bounds (length 2*m). .bracket_quadratic_setup returns an
-    # n_rows x 2 matrix, so we unpack the two columns.
+
     b_flat <- c(bq[[2]][, 1L], bq[[2]][, 2L])
     delta  <- bracket_quadratic(bq[[1]], b = b_flat)$par
-
     if (abs(delta) < 1e-10) next
 
-    # Verify with the full loss difference (captures cross-covariate terms
-    # that bracket_quadratic does not model).
     d <- .loss_difference(betahat, j, delta, vox, env = env)
-    if (d < -1e-10) {
-      .update_XTXB_incremental(j, delta, vox, env = env)
-      new_beta            <- beta_k + delta
-      env$alphahat_full[j, vox] <- new_beta
-      betahat[vox]        <- new_beta
-      region_list[[k]][[2]] <- new_beta
-    }
+    cand <- list(type = "revalue", k = k, vox = vox, delta = delta,
+                 beta_new = beta_k + delta, loss_diff = d)
+    best <- .better_operation(best, cand)
   }
-  region_list
+
+  best
 }
 
 
 # =============================================================================
-# 2.  EXPAND
-# For each region, tries to absorb each unoccupied face-adjacent neighbour.
-# Greedy: accepts the first beneficial voxel, then continues.
+# EXPAND
 # =============================================================================
 
 #' @keywords internal
-.sira_op_expand <- function(j, region_list, betahat, env) {
+.sira_best_expand_candidate <- function(j, region_list, betahat, env) {
+  best     <- NULL
   occupied <- .voxels_in_regions(region_list)
 
   for (k in seq_along(region_list)) {
     vox    <- region_list[[k]][[1]]
     beta_k <- region_list[[k]][[2]]
-    if (abs(beta_k) < 1e-10) next   # zero region — nothing to expand into
+    if (length(vox) == 0L || abs(beta_k) < 1e-10) next
 
-    # Unoccupied face-adjacent neighbours
     nb_all     <- unique(unlist(env$neighbor_list[vox], use.names = FALSE))
     candidates <- setdiff(nb_all, occupied)
     if (length(candidates) == 0L) next
 
-    # Greedy single-voxel additions
     for (v in candidates) {
-      if (v %in% occupied) next   # earlier iteration in this loop may have added it
       d <- .loss_difference(betahat, j, beta_k, v, env = env)
-      if (d < -1e-10) {
-        .update_XTXB_incremental(j, beta_k, v, env = env)
-        env$alphahat_full[j, v] <- beta_k
-        betahat[v]              <- beta_k
-        occupied                <- c(occupied, v)
-        region_list[[k]][[1]]   <- c(region_list[[k]][[1]], v)
-      }
+      cand <- list(type = "expand", k = k, vox = v, beta_new = beta_k,
+                   loss_diff = d)
+      best <- .better_operation(best, cand)
     }
   }
-  region_list
+
+  best
 }
 
 
 # =============================================================================
-# 3.  SHRINK
-# For each region, tries to remove boundary voxels one at a time.
-# A removal is only attempted if it (a) improves the loss and (b) does not
-# disconnect the region.
+# SHRINK
 # =============================================================================
 
 #' @keywords internal
-.sira_op_shrink <- function(j, region_list, betahat, env) {
+.sira_best_shrink_candidate <- function(j, region_list, betahat, env) {
+  best <- NULL
+
   for (k in seq_along(region_list)) {
     vox    <- region_list[[k]][[1]]
     beta_k <- region_list[[k]][[2]]
     if (length(vox) <= 1L) next
 
-    # Boundary voxels: inside the region and with at least one external neighbour
     is_boundary <- vapply(vox, function(v) {
       any(!(env$neighbor_list[[v]] %in% vox))
     }, logical(1L))
     boundary_vox <- vox[is_boundary]
     if (length(boundary_vox) == 0L) next
 
-    current_vox <- vox
-
     for (v in boundary_vox) {
-      if (!(v %in% current_vox)) next   # already removed in this loop
-      if (length(current_vox) <= 1L) break
-
-      # Fast path: if v has >1 neighbour in the region it might be an
-      # articulation point — do a full connectivity check.  If it has ≤1
-      # in-region neighbour, removal cannot disconnect the component.
-      n_in <- sum(env$neighbor_list[[v]] %in% current_vox)
+      n_in <- sum(env$neighbor_list[[v]] %in% vox)
       if (n_in > 1L) {
-        remaining <- setdiff(current_vox, v)
+        remaining <- setdiff(vox, v)
         if (length(.get_connected_components(remaining, env$neighbor_list)) > 1L)
-          next   # would disconnect — skip
+          next
       }
 
-      # Check loss diff: zero out voxel v (delta = -beta_k)
       d <- .loss_difference(betahat, j, -beta_k, v, env = env)
-      if (d < -1e-10) {
-        .update_XTXB_incremental(j, -beta_k, v, env = env)
-        env$alphahat_full[j, v] <- 0
-        betahat[v]              <- 0
-        current_vox             <- setdiff(current_vox, v)
-      }
+      cand <- list(type = "shrink", k = k, vox = v, delta = -beta_k,
+                   loss_diff = d)
+      best <- .better_operation(best, cand)
     }
-
-    region_list[[k]][[1]] <- current_vox
-    if (length(current_vox) == 0L) region_list[[k]][[2]] <- 0
   }
-  region_list
+
+  best
 }
 
 
 # =============================================================================
-# 4.  MERGE
-# Scans all pairs of adjacent regions and applies the single best merge.
-# Repeats until no beneficial merge remains (greedy best-first).
+# MERGE
 # =============================================================================
 
 #' @keywords internal
-.sira_op_merge <- function(j, region_list, betahat, env) {
-  if (length(region_list) < 2L) return(region_list)
+.sira_best_merge_candidate <- function(j, region_list, betahat, env) {
+  if (length(region_list) < 2L) return(NULL)
 
-  changed <- TRUE
-  while (changed && length(region_list) >= 2L) {
-    changed  <- FALSE
-    n_reg    <- length(region_list)
-    best_d   <- -1e-10   # threshold: only accept strictly beneficial merges
-    best_k1  <- NA_integer_
-    best_k2  <- NA_integer_
-    best_new <- NA_real_
+  betas <- vapply(region_list, `[[`, numeric(1L), 2L)
+  ord   <- order(betas)
+  best  <- NULL
 
-    for (k1 in seq_len(n_reg - 1L)) {
-      vox1  <- region_list[[k1]][[1]]
-      beta1 <- region_list[[k1]][[2]]
-      nb1   <- unique(unlist(env$neighbor_list[vox1], use.names = FALSE))
+  for (idx in seq_len(length(ord) - 1L)) {
+    k1 <- ord[idx]
+    k2 <- ord[idx + 1L]
 
-      for (k2 in seq(k1 + 1L, n_reg)) {
-        vox2  <- region_list[[k2]][[1]]
-        beta2 <- region_list[[k2]][[2]]
+    vox1  <- region_list[[k1]][[1]]
+    vox2  <- region_list[[k2]][[1]]
+    beta1 <- region_list[[k1]][[2]]
+    beta2 <- region_list[[k2]][[2]]
+    if (length(vox1) == 0L || length(vox2) == 0L) next
 
-        if (!any(nb1 %in% vox2)) next   # not face-adjacent
-
-        # Candidate merged beta: unconstrained OLS over the combined region
-        beta_new <- .optimal_merge_beta(vox1, vox2, beta1, beta2, j, env)
-        d <- .loss_difference(betahat, j,
-                              beta_new - beta1, vox1,
-                              beta_new - beta2, vox2, env)
-        if (d < best_d) {
-          best_d   <- d
-          best_k1  <- k1
-          best_k2  <- k2
-          best_new <- beta_new
-        }
-      }
-    }
-
-    if (!is.na(best_k1)) {
-      vox1  <- region_list[[best_k1]][[1]]
-      vox2  <- region_list[[best_k2]][[1]]
-      beta1 <- region_list[[best_k1]][[2]]
-      beta2 <- region_list[[best_k2]][[2]]
-
-      .update_XTXB_incremental(j, best_new - beta1, vox1,
-                               best_new - beta2, vox2, env = env)
-      env$alphahat_full[j, c(vox1, vox2)] <- best_new
-      betahat[c(vox1, vox2)]              <- best_new
-
-      region_list[[best_k1]][[1]] <- c(vox1, vox2)
-      region_list[[best_k1]][[2]] <- best_new
-      region_list[[best_k2]]      <- NULL
-      region_list <- region_list[!vapply(region_list, is.null, logical(1L))]
-
-      changed <- TRUE
-    }
+    beta_new <- .optimal_merge_beta(vox1, vox2, beta1, beta2, j, env)
+    d <- .loss_difference(betahat, j,
+                          beta_new - beta1, vox1,
+                          beta_new - beta2, vox2, env)
+    cand <- list(type = "merge", k1 = k1, k2 = k2,
+                 vox1 = vox1, vox2 = vox2,
+                 beta1 = beta1, beta2 = beta2,
+                 beta_new = beta_new, loss_diff = d)
+    best <- .better_operation(best, cand)
   }
-  region_list
+
+  best
 }
 
 
 # =============================================================================
-# 5.  SPLIT
-# Tries to divide each large region along each of the 3 coordinate axes,
-# taking the largest connected component on each side.  Accepts the best
-# axis split if it improves the loss.
-#
-# Leftover voxels (trimmed when taking LCCs) are zeroed immediately.
-# Their contribution to the loss check is computed approximately (cross-terms
-# with sub1/sub2 are ignored), which is acceptable since leftover sets are
-# small and any remaining benefit is recovered by subsequent shrink ops.
+# SPLIT
 # =============================================================================
 
 #' @keywords internal
-.sira_op_split <- function(j, region_list, betahat, env) {
-  result <- vector("list", 0L)
+.sira_best_split_candidate <- function(j, region_list, betahat, env) {
+  best <- NULL
 
   for (k in seq_along(region_list)) {
     vox    <- region_list[[k]][[1]]
     beta_k <- region_list[[k]][[2]]
+    n_vox  <- length(vox)
+    if (n_vox < 2L) next
 
-    # Minimum region size to produce two viable sub-regions of ≥5 voxels
-    if (length(vox) < 10L) {
-      result[[length(result) + 1L]] <- region_list[[k]]
-      next
-    }
+    grad <- .split_gradients(j, vox, env)
+    ord  <- order(grad, decreasing = TRUE)
+    n1   <- ceiling(n_vox / 2)
+    sub1 <- vox[ord[seq_len(n1)]]
+    sub2 <- vox[ord[(n1 + 1L):n_vox]]
+    if (length(sub1) == 0L || length(sub2) == 0L) next
 
-    coords     <- .get_voxel_coords(vox, env)
-    best_d     <- -1e-10
-    best_split <- NULL
+    opt <- .optimize_split_values(j, sub1, sub2, beta_k, betahat, env)
+    if (is.null(opt)) next
 
-    for (axis in seq_len(3L)) {
-      ax_vals <- coords[, axis]
-      if (length(unique(ax_vals)) < 2L) next
-
-      med_ax <- median(ax_vals)
-      sub1   <- .get_largest_connected_component(
-        vox[ax_vals <= med_ax], env$neighbor_list)
-      sub2   <- .get_largest_connected_component(
-        vox[ax_vals >  med_ax], env$neighbor_list)
-      if (length(sub1) < 5L || length(sub2) < 5L) next
-
-      b1 <- .optimal_split_beta(sub1, beta_k, j, env)
-      b2 <- .optimal_split_beta(sub2, beta_k, j, env)
-
-      leftover <- setdiff(vox, c(sub1, sub2))
-
-      # Loss diff for the primary split (sub1 → b1, sub2 → b2)
-      d <- .loss_difference(betahat, j, b1 - beta_k, sub1,
-                            b2 - beta_k, sub2, env)
-
-      # Approximate loss diff for zeroing leftover (ignores cross-terms with
-      # sub1/sub2 since those betas have already changed in the proposal)
-      if (length(leftover) > 0L)
-        d <- d + .loss_difference(betahat, j, -beta_k, leftover, env = env)
-
-      if (d < best_d) {
-        best_d     <- d
-        best_split <- list(sub1 = sub1, sub2 = sub2,
-                           b1 = b1, b2 = b2, leftover = leftover)
-      }
-    }
-
-    if (!is.null(best_split)) {
-      sub1 <- best_split$sub1;  sub2 <- best_split$sub2
-      b1   <- best_split$b1;    b2   <- best_split$b2
-      lo   <- best_split$leftover
-
-      # Apply sub1 and sub2 updates together (captures cross-terms)
-      .update_XTXB_incremental(j, b1 - beta_k, sub1,
-                               b2 - beta_k, sub2, env = env)
-      env$alphahat_full[j, sub1] <- b1
-      env$alphahat_full[j, sub2] <- b2
-      betahat[sub1] <- b1
-      betahat[sub2] <- b2
-
-      # Zero out any leftover voxels
-      if (length(lo) > 0L) {
-        .update_XTXB_incremental(j, -beta_k, lo, env = env)
-        env$alphahat_full[j, lo] <- 0
-        betahat[lo]              <- 0
-      }
-
-      result[[length(result) + 1L]] <- list(sub1, b1)
-      result[[length(result) + 1L]] <- list(sub2, b2)
-    } else {
-      result[[length(result) + 1L]] <- region_list[[k]]
-    }
+    d <- .loss_difference(betahat, j,
+                          opt$b1 - beta_k, sub1,
+                          opt$b2 - beta_k, sub2, env)
+    cand <- list(type = "split", k = k,
+                 sub1 = sub1, sub2 = sub2,
+                 beta_old = beta_k, b1 = opt$b1, b2 = opt$b2,
+                 loss_diff = d)
+    best <- .better_operation(best, cand)
   }
 
-  result
+  best
+}
+
+#' @keywords internal
+.split_gradients <- function(j, vox, env) {
+  2 * (env$XTXB[vox, j] - env$XTY_tilde[j, vox]) / env$n
+}
+
+#' @keywords internal
+.optimize_split_values <- function(j, sub1, sub2, beta_old, betahat, env,
+                                   max_cd_iter = 10L) {
+  b1 <- beta_old
+  b2 <- beta_old
+  betahat_cur <- betahat
+
+  for (iter in seq_len(max_cd_iter)) {
+    changed <- FALSE
+
+    d1 <- .optimal_region_delta_current(
+      j = j, region_voxels = sub1, current_beta = b1,
+      base_beta = beta_old, betahat_current = betahat_cur, env = env
+    )
+    if (is.finite(d1) && abs(d1) > 1e-10) {
+      b1 <- b1 + d1
+      betahat_cur[sub1] <- b1
+      changed <- TRUE
+    }
+
+    d2 <- .optimal_region_delta_current(
+      j = j, region_voxels = sub2, current_beta = b2,
+      base_beta = beta_old, betahat_current = betahat_cur, env = env
+    )
+    if (is.finite(d2) && abs(d2) > 1e-10) {
+      b2 <- b2 + d2
+      betahat_cur[sub2] <- b2
+      changed <- TRUE
+    }
+
+    if (!changed) break
+  }
+
+  list(b1 = b1, b2 = b2)
+}
+
+#' @keywords internal
+.optimal_region_delta_current <- function(j, region_voxels, current_beta,
+                                          base_beta, betahat_current, env) {
+  if (length(region_voxels) == 0L) return(0)
+
+  region_neighbors <- .get_region_neighbors(region_voxels, env)
+  bq <- .bracket_quadratic_setup_custom(
+    region_voxels    = region_voxels,
+    region_size      = length(region_voxels),
+    region_beta      = current_beta,
+    base_beta        = base_beta,
+    region_neighbors = region_neighbors,
+    betahat          = betahat_current,
+    which_beta       = j,
+    env              = env
+  )
+
+  b_flat <- c(bq[[2]][, 1L], bq[[2]][, 2L])
+  bracket_quadratic(bq[[1]], b = b_flat)$par
 }
 
 
 # =============================================================================
-# INTERNAL HELPERS
+# OPERATION APPLICATION
 # =============================================================================
 
+#' @keywords internal
+.sira_apply_operation <- function(j, region_list, op, env) {
+  if (op$type == "revalue") {
+    .update_XTXB_incremental(j, op$delta, op$vox, env = env)
+    env$alphahat_full[j, op$vox] <- op$beta_new
+    region_list[[op$k]][[2]] <- op$beta_new
+    return(region_list)
+  }
 
-# -----------------------------------------------------------------------------
-# .optimal_merge_beta
-# Unconstrained OLS estimate for the common beta after merging vox1 and vox2.
-# Accounts for cross-terms with the rest of the image via env$XTXB.
-#
-# Derivation (MS loss, setting dL/d(beta_new) = 0):
-#   beta_new = (xty_merged - cross_outside) / xtx_merged
-# where
-#   cross_outside = XTXB[vox_merged] - beta1 * XTX[vox1, vox_merged]
-#                                     - beta2 * XTX[vox2, vox_merged]
-# -----------------------------------------------------------------------------
+  if (op$type == "expand") {
+    .update_XTXB_incremental(j, op$beta_new, op$vox, env = env)
+    env$alphahat_full[j, op$vox] <- op$beta_new
+    region_list[[op$k]][[1]] <- c(region_list[[op$k]][[1]], op$vox)
+    return(region_list)
+  }
+
+  if (op$type == "shrink") {
+    .update_XTXB_incremental(j, op$delta, op$vox, env = env)
+    env$alphahat_full[j, op$vox] <- 0
+    region_list[[op$k]][[1]] <- setdiff(region_list[[op$k]][[1]], op$vox)
+    return(region_list)
+  }
+
+  if (op$type == "merge") {
+    .update_XTXB_incremental(j, op$beta_new - op$beta1, op$vox1,
+                             op$beta_new - op$beta2, op$vox2, env = env)
+    merged_vox <- c(op$vox1, op$vox2)
+    env$alphahat_full[j, merged_vox] <- op$beta_new
+    region_list[[op$k1]] <- list(merged_vox, op$beta_new)
+    region_list[[op$k2]] <- NULL
+    return(region_list[!vapply(region_list, is.null, logical(1L))])
+  }
+
+  if (op$type == "split") {
+    .update_XTXB_incremental(j, op$b1 - op$beta_old, op$sub1,
+                             op$b2 - op$beta_old, op$sub2, env = env)
+    env$alphahat_full[j, op$sub1] <- op$b1
+    env$alphahat_full[j, op$sub2] <- op$b2
+    region_list[[op$k]] <- list(op$sub1, op$b1)
+    region_list[[length(region_list) + 1L]] <- list(op$sub2, op$b2)
+    return(region_list)
+  }
+
+  stop("Unknown region operation type: ", op$type)
+}
+
+
+# =============================================================================
+# HELPERS
+# =============================================================================
+
+#' @keywords internal
+.sort_regions_by_beta <- function(region_list) {
+  if (length(region_list) <= 1L) return(region_list)
+  betas <- vapply(region_list, `[[`, numeric(1L), 2L)
+  region_list[order(betas)]
+}
+
+#' @keywords internal
+.bracket_quadratic_setup_custom <- function(region_voxels, region_size,
+                                            region_beta, base_beta,
+                                            region_neighbors, betahat,
+                                            which_beta, env) {
+  nb_size <- length(region_neighbors)
+  n_rows  <- 2L * nb_size + 3L
+
+  coefs <- matrix(0, nrow = n_rows, ncol = 3L)
+  b     <- matrix(0, nrow = n_rows, ncol = 2L)
+
+  lam <- env$lambda
+  mu  <- env$mu
+  n   <- env$n
+
+  if (nb_size > 0L) {
+    nb_diffs <- betahat[region_neighbors] - region_beta
+
+    coefs[seq_len(nb_size), 2L] <- -lam
+    coefs[seq_len(nb_size), 3L] <-  lam * nb_diffs
+
+    rows2 <- nb_size + seq_len(nb_size)
+    coefs[rows2, 2L] <-  lam
+    coefs[rows2, 3L] <- -lam * nb_diffs
+
+    b[seq_len(nb_size),  2L] <-  nb_diffs
+    b[rows2,             1L] <-  nb_diffs
+    b[seq_len(nb_size),  1L] <- -Inf
+    b[rows2,             2L] <-  Inf
+  }
+
+  r1 <- 2L * nb_size + 1L
+  coefs[r1, 2L] <- -mu * region_size
+  coefs[r1, 3L] <- -mu * region_size * region_beta
+  b[r1, 1L]     <- -Inf
+  b[r1, 2L]     <- -region_beta
+
+  r2 <- 2L * nb_size + 2L
+  coefs[r2, 2L] <-  mu * region_size
+  coefs[r2, 3L] <-  mu * region_size * region_beta
+  b[r2, 1L]     <- -region_beta
+  b[r2, 2L]     <-  Inf
+
+  r3 <- 2L * nb_size + 3L
+  xtx_jj    <- region_size * env$XTX_p1[which_beta, which_beta]
+  xty_term  <- sum(env$XTY_tilde[which_beta, region_voxels])
+  xtxb_term <- sum(env$XTXB[region_voxels, which_beta]) +
+    region_size * (region_beta - base_beta) * env$XTX_p1[which_beta, which_beta]
+  coefs[r3, 1L] <- xtx_jj / n
+  coefs[r3, 2L] <- 2 * (xtxb_term - xty_term) / n
+  b[r3, 1L]     <- -Inf
+  b[r3, 2L]     <- Inf
+
+  list(coefs, b)
+}
 
 #' @keywords internal
 .optimal_merge_beta <- function(vox1, vox2, beta1, beta2, j, env) {
-  # Closed-form OLS optimal beta for the merged region.
-  # Setting dL_MS/d(beta_new) = 0 (voxels are independent):
-  #   beta_new = (xty_m - xtxb_m + XTX_jj*(|v1|*beta1 + |v2|*beta2))
-  #              / (|merged| * XTX_jj)
   vox_m   <- c(vox1, vox2)
-  XTX_jj  <- env$XTX_p1[j, j]
-  xtx_m   <- length(vox_m) * XTX_jj
+  xtx_jj  <- env$XTX_p1[j, j]
+  xtx_m   <- length(vox_m) * xtx_jj
   if (xtx_m < 1e-10) return((beta1 + beta2) / 2)
 
-  xtxb_m  <- sum(env$XTXB[vox_m, j])
-  xty_m   <- sum(env$XTY_tilde[j, vox_m])
-  self    <- XTX_jj * (length(vox1) * beta1 + length(vox2) * beta2)
+  xtxb_m <- sum(env$XTXB[vox_m, j])
+  xty_m  <- sum(env$XTY_tilde[j, vox_m])
+  self   <- xtx_jj * (length(vox1) * beta1 + length(vox2) * beta2)
 
   (xty_m - xtxb_m + self) / xtx_m
-}
-
-
-# -----------------------------------------------------------------------------
-# .optimal_split_beta
-# Unconstrained OLS estimate for a sub-region's beta after splitting, holding
-# all other regions (including the complementary sub-region) at their current
-# betahat values.
-#
-# Derivation (MS loss, setting dL/d(beta_sub) = 0):
-#   beta_sub = current_beta + (xty_sub - xtxb_sub) / xtx_sub
-# where xtxb_sub already encodes the self-contribution at current_beta, so
-# subtracting it isolates the cross-terms with external voxels.
-# -----------------------------------------------------------------------------
-
-#' @keywords internal
-.optimal_split_beta <- function(sub_vox, current_beta, j, env) {
-  # Closed-form OLS optimal beta for a sub-region after splitting.
-  # Setting dL_MS/d(beta_sub) = 0:
-  #   beta_sub = current_beta + (xty_sub - xtxb_sub) / (|sub| * XTX_jj)
-  xtx_s <- length(sub_vox) * env$XTX_p1[j, j]
-  if (xtx_s < 1e-10) return(current_beta)
-
-  xtxb_s <- sum(env$XTXB[sub_vox, j])
-  xty_s  <- sum(env$XTY_tilde[j, sub_vox])
-
-  current_beta + (xty_s - xtxb_s) / xtx_s
 }

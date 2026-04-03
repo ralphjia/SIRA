@@ -35,6 +35,16 @@ contiguous regions with a constant value). It achieves this via a
 coordinate-descent algorithm with five region operations: revalue, expand,
 shrink, merge, and split.
 
+Initialization follows the workflow described in the paper: SIRA computes a
+mass-univariate estimate, smooths the resulting t-statistics, applies
+`locfdr` to identify positive and negative starting voxels, and falls back to
+the top and bottom 2% of the smoothed t-map if `locfdr` does not select any
+voxels. During fitting, SIRA evaluates all candidate region operations for a
+covariate, accepts the single best loss-decreasing move, and repeats until no
+further improvement is available. Merge candidates are restricted to adjacent
+region values after sorting the current regions by their coefficient values,
+and split candidates are constructed from voxelwise loss gradients.
+
 ## A simple example
 
 We begin with a single covariate and a small 10×10×10 image to verify basic
@@ -232,7 +242,7 @@ beta1_array[1, , ]
 ## Irregular and brain-masked data
 
 When voxels do not sit on a rectangular grid — for example, when `Y` contains
-only grey-matter masked voxels from a brain atlas — pass a V x 3 matrix of
+only gray-matter masked voxels from a brain atlas — pass a V x 3 matrix of
 spatial coordinates instead of `d1`, `d2`, `d3`:
 
 ```{r coords-example, eval = FALSE}
@@ -242,7 +252,7 @@ fit_masked <- sira(Y = Y_masked, X = X, Z = Z,
                    lambda = 0.05, mu = 0.01)
 ```
 
-SIRA determines adjacency automatically: two voxels are 6-connected neighbours
+SIRA determines adjacency automatically: two voxels are 6-connected neighbors
 if they differ by exactly one voxel spacing along one axis and are coincident
 on the other two. The spacing is detected from the minimum gap between unique
 coordinate values on each axis, so both millimetre and voxel-index coordinates
@@ -263,4 +273,7 @@ SIRA has two tuning parameters:
 - **`mu`** controls sparsity. Larger values produce fewer nonzero voxels.
 
 Both can be selected by cross-validation or by inspecting the convergence
-behavior across a grid of values.
+behavior across a grid of values. In the paper, a practical strategy is to run
+SIRA over a grid of `(lambda, mu)` values and choose among the fitted models
+using BIC, with degrees of freedom approximated by the number of boundary
+voxels in the final solution.

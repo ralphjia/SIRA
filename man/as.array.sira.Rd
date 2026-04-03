@@ -12,6 +12,8 @@
 \item{j}{Integer. Which covariate of interest to extract (default \code{1}).}
 
 \item{type}{\code{"beta"} or \code{"gamma"}.}
+
+\item{...}{Ignored.}
 }
 \value{
 A 3D numeric array with dimensions \code{c(d1, d2, d3)}.

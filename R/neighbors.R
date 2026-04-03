@@ -63,7 +63,7 @@
 # Two voxels are 6-connected if they differ by exactly one voxel spacing in
 # exactly one axis and are coincident in the other two.  The per-axis spacing
 # is detected as the minimum positive gap between unique coordinate values.
-# Coordinates are normalised to an integer grid before hashing, which handles
+# Coordinates are normalized to an integer grid before hashing, which handles
 # floating-point representations of regular grids (e.g. MNI mm coordinates).
 # -----------------------------------------------------------------------------
 
@@ -83,7 +83,7 @@
   # so offsets along that axis never match any real voxel.
   spacing[is.na(spacing)] <- .Machine$double.xmax
 
-  # --- Normalise to integer grid -----------------------------------------
+  # --- Normalize to integer grid -----------------------------------------
   grid <- round(sweep(coords, 2L, spacing, "/"))   # V x 3
 
   # --- Build coordinate -> voxel index hash ------------------------------
@@ -252,7 +252,7 @@
 #' @keywords internal
 .get_connected_components <- function(voxels, neighbor_list) {
   if (length(voxels) == 0L) return(list())
-  voxel_to_idx <- setNames(seq_along(voxels), voxels)
+  voxel_to_idx <- stats::setNames(seq_along(voxels), voxels)
   visited      <- logical(length(voxels))
   components   <- list()
   for (start in seq_along(voxels)) {

@@ -2,7 +2,7 @@
 % Please edit documentation in R/sira.R
 \name{summary.sira}
 \alias{summary.sira}
-\title{Summarise a SIRA fit}
+\title{Summarize a SIRA fit}
 \usage{
 \method{summary}{sira}(object, ...)
 }

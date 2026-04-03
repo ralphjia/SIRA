@@ -94,14 +94,14 @@
 
     if (env$verbose)
       message(sprintf(
-        "  Iter %3d | regions: %d | voxels: %d | ||Δbeta||_F: %.6f",
+        "  Iter %3d | regions: %d | voxels: %d | ||d_beta||_F: %.6f",
         iter, num_regions, num_voxels, norm_diff
       ))
 
     if (norm_diff < env$delta) {
       if (env$verbose)
         message(sprintf(
-          "  Converged at iteration %d (||Δbeta||_F = %.6f < delta = %.6f).",
+          "  Converged at iteration %d (||d_beta||_F = %.6f < delta = %.6f).",
           iter, norm_diff, env$delta
         ))
       break

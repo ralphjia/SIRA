@@ -10,13 +10,23 @@
 #' Fits an image-on-scalar regression model using the Scalable Image-on-Scalar
 #' Regression Algorithm (SIRA). The model is:
 #'
+#' SIRA initializes each coefficient image with a mass-univariate estimate,
+#' smooths the resulting t-statistics, uses \code{locfdr} to define positive
+#' and negative starting regions, and then repeatedly applies the single
+#' best loss-decreasing region operation among revalue, expand, shrink, merge,
+#' and split. Nuisance coefficients and spatial random-effect scores are
+#' updated in closed form between region sweeps.
+#'
 #' \deqn{Y_i(s_v) = \sum_{j=1}^{p_1} \beta_j(s_v) X_{ij} +
 #'   \sum_{k=1}^{p_2} \gamma_k(s_v) Z_{ik} + \eta_i(s_v) + \epsilon_i(s_v)}
 #'
 #' SIRA enforces sparsity and spatial homogeneity on the coefficient images
 #' \eqn{\beta_j} using a coordinate-descent algorithm with five region
-#' operations (expand, shrink, revalue, merge, split). It uses precomputed
-#' summary statistics to remain scalable to high-dimensional neuroimaging data.
+#' operations (expand, shrink, revalue, merge, split). Merge candidates are
+#' restricted to adjacent coefficient values after ranking the current regions,
+#' and split candidates are constructed from voxelwise loss gradients. The
+#' implementation uses precomputed summary statistics to remain scalable to
+#' high-dimensional neuroimaging data.
 #'
 #' @param Y An \eqn{n \times V} numeric matrix of image outcomes. Each row is
 #'   one subject's vectorized image (column-major / Fortran order).
@@ -31,6 +41,10 @@
 #'   smoothness. Larger values produce larger, blockier regions.
 #' @param mu Non-negative numeric. L1 sparsity penalty. Larger values produce
 #'   sparser solutions (fewer nonzero voxels).
+#' @param coords Optional \eqn{V \times 3} numeric matrix of voxel coordinates
+#'   for irregular or masked layouts. Supply \code{coords} instead of
+#'   \code{d1}, \code{d2}, \code{d3} when voxels do not lie on a full
+#'   rectangular grid.
 #' @param Psi_star Optional \eqn{L \times V} numeric matrix. Spatial individual
 #'   effects basis computed by \code{BayesGPfit}. If \code{NULL} (default),
 #'   SIRA calls \code{BayesGPfit} internally with \code{poly_degree = 8}.
@@ -147,6 +161,7 @@ sira <- function(Y, X, Z,
   env$d1 <- as.integer(d1)
   env$d2 <- as.integer(d2)
   env$d3 <- as.integer(d3)
+  env$coords <- if (use_coords) coords else NULL
   env$X  <- X;   env$Y  <- Y;   env$Z <- Z
   env$lambda  <- lambda
   env$mu      <- mu
@@ -180,7 +195,6 @@ sira <- function(Y, X, Z,
   # ---- 6. Initialization ------------------------------------------------
   if (env$verbose) message("[SIRA] Initializing regions (MUA-based)...")
   env$initial_region_list_full <- .sira_initialize_all_regions(env)
-  # sets env$XTX, env$active_voxels (via .expand_active_set)
 
   # Build alphahat_full: (p1+p2) x V matrix, rows = covariates then confounders
   env$alphahat_full <- matrix(0, nrow = p1 + p2, ncol = V)
@@ -249,15 +263,15 @@ sira <- function(Y, X, Z,
          "Install it with: install.packages('BayesGPfit')")
 
   if (!requireNamespace("pracma", quietly = TRUE))
-    stop("pracma is required for Gram-Schmidt orthogonalisation. ",
+    stop("pracma is required for Gram-Schmidt orthogonalization. ",
          "Install it with: install.packages('pracma')")
 
   V <- env$V
 
-  # Build normalised coordinate grid in [-1, 1]^3.
+  # Build normalized coordinate grid in [-1, 1]^3.
   # Two paths: use supplied coords (irregular layout) or build from d1/d2/d3.
   if (!is.null(env$coords)) {
-    # Normalise each axis of the supplied coordinates to [-1, 1].
+    # Normalize each axis of the supplied coordinates to [-1, 1].
     v_list <- apply(env$coords, 2L, function(ax) {
       rng <- range(ax)
       if (diff(rng) < 1e-8) rep(0, length(ax))   # degenerate axis
@@ -282,7 +296,7 @@ sira <- function(Y, X, Z,
                                              poly_degree = poly_degree,
                                              a = a, b = b)
 
-  # Step 2: orthogonalise columns via Gram-Schmidt  (V x L)
+  # Step 2: orthogonalize columns via Gram-Schmidt  (V x L)
   Psi_orth <- pracma::gramSchmidt(Psi_raw)$Q
 
   # Step 3: eigenvalues  (length L)
@@ -380,7 +394,7 @@ print.sira <- function(x, ...) {
   invisible(x)
 }
 
-#' Summarise a SIRA fit
+#' Summarize a SIRA fit
 #'
 #' Prints the call, the brief \code{print} output, and the full convergence
 #' history.
@@ -423,6 +437,7 @@ coef.sira <- function(object, type = c("beta", "gamma"), ...) {
 #' @param x A \code{"sira"} object.
 #' @param j Integer. Which covariate of interest to extract (default \code{1}).
 #' @param type \code{"beta"} or \code{"gamma"}.
+#' @param ... Ignored.
 #' @return A 3D numeric array with dimensions \code{c(d1, d2, d3)}.
 #' @export
 as.array.sira <- function(x, j = 1L, type = c("beta", "gamma"), ...) {
@@ -430,7 +445,7 @@ as.array.sira <- function(x, j = 1L, type = c("beta", "gamma"), ...) {
     stop("as.array() is not supported for fits with irregular voxel layouts ",
          "(coords were supplied instead of d1/d2/d3). ",
          "Use coef() to extract the length-V coefficient vector instead.")
-  mat  <- coef(x, type = match.arg(type))
+  mat  <- stats::coef(x, type = match.arg(type))
   vec  <- mat[j, ]
   array(vec, dim = x$dims)
 }

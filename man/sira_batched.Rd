@@ -46,6 +46,11 @@ smoothness. Larger values produce larger, blockier regions.}
 \item{mu}{Non-negative numeric. L1 sparsity penalty. Larger values produce
 sparser solutions (fewer nonzero voxels).}
 
+\item{coords}{Optional \eqn{V \times 3} numeric matrix of voxel coordinates
+for irregular or masked layouts. Supply \code{coords} instead of
+\code{d1}, \code{d2}, \code{d3} when voxels do not lie on a full
+rectangular grid.}
+
 \item{Y_reader}{Function with signature \code{function(path) -> matrix}.
 Default is \code{readRDS}.  Use a custom reader for CSV, HDF5, etc.}
 
@@ -68,7 +73,10 @@ An object of class \code{"sira"} — identical structure to the
 \description{
 Fits the same model as \code{\link{sira}} but reads the outcome matrix
 \eqn{Y} from disk in batches, so the full \eqn{n \times V} matrix is
-never held in memory simultaneously.
+never held in memory simultaneously. The batched implementation uses the
+same MUA plus smoothed-t initialization and the same best-single-operation
+region updates as \code{\link{sira}}, but accumulates the required summary
+statistics one batch at a time.
 }
 \examples{
 \dontrun{

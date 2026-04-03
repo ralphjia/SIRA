@@ -42,6 +42,11 @@ smoothness. Larger values produce larger, blockier regions.}
 \item{mu}{Non-negative numeric. L1 sparsity penalty. Larger values produce
 sparser solutions (fewer nonzero voxels).}
 
+\item{coords}{Optional \eqn{V \times 3} numeric matrix of voxel coordinates
+for irregular or masked layouts. Supply \code{coords} instead of
+\code{d1}, \code{d2}, \code{d3} when voxels do not lie on a full
+rectangular grid.}
+
 \item{Psi_star}{Optional \eqn{L \times V} numeric matrix. Spatial individual
 effects basis computed by \code{BayesGPfit}. If \code{NULL} (default),
 SIRA calls \code{BayesGPfit} internally with \code{poly_degree = 8}.}
@@ -79,13 +84,23 @@ Fits an image-on-scalar regression model using the Scalable Image-on-Scalar
 Regression Algorithm (SIRA). The model is:
 }
 \details{
+SIRA initializes each coefficient image with a mass-univariate estimate,
+smooths the resulting t-statistics, uses \code{locfdr} to define positive
+and negative starting regions, and then repeatedly applies the single
+best loss-decreasing region operation among revalue, expand, shrink, merge,
+and split. Nuisance coefficients and spatial random-effect scores are
+updated in closed form between region sweeps.
+
 \deqn{Y_i(s_v) = \sum_{j=1}^{p_1} \beta_j(s_v) X_{ij} +
   \sum_{k=1}^{p_2} \gamma_k(s_v) Z_{ik} + \eta_i(s_v) + \epsilon_i(s_v)}
 
 SIRA enforces sparsity and spatial homogeneity on the coefficient images
 \eqn{\beta_j} using a coordinate-descent algorithm with five region
-operations (expand, shrink, revalue, merge, split). It uses precomputed
-summary statistics to remain scalable to high-dimensional neuroimaging data.
+operations (expand, shrink, revalue, merge, split). Merge candidates are
+restricted to adjacent coefficient values after ranking the current regions,
+and split candidates are constructed from voxelwise loss gradients. The
+implementation uses precomputed summary statistics to remain scalable to
+high-dimensional neuroimaging data.
 }
 \examples{
 \dontrun{
