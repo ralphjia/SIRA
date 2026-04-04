@@ -189,13 +189,6 @@
     if (length(boundary_vox) == 0L) next
 
     for (v in boundary_vox) {
-      n_in <- sum(env$neighbor_list[[v]] %in% vox)
-      if (n_in > 1L) {
-        remaining <- setdiff(vox, v)
-        if (length(.get_connected_components(remaining, env$neighbor_list)) > 1L)
-          next
-      }
-
       d <- .loss_difference(betahat, j, -beta_k, v, env = env)
       cand <- list(type = "shrink", k = k, vox = v, delta = -beta_k,
                    loss_diff = d)
