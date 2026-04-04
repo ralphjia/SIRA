@@ -229,7 +229,7 @@
     beta2 <- region_list[[k2]][[2]]
     if (length(vox1) == 0L || length(vox2) == 0L) next
 
-    beta_new <- .optimal_merge_beta(vox1, vox2, beta1, beta2, j, env)
+    beta_new <- .optimal_merge_beta(vox1, vox2, beta1, beta2, betahat, j, env)
     d <- .loss_difference(betahat, j,
                           beta_new - beta1, vox1,
                           beta_new - beta2, vox2, env)
@@ -352,7 +352,7 @@
     region_neighbors = region_neighbors,
     betahat          = betahat_current,
     which_beta       = j,
-    XTXB_local       = .xtxb_from_betahat(j, betahat_current, env),
+    XTXB_local       = .xtxb_with_current_beta(j, betahat_current, env),
     env              = env
   )
 
@@ -424,25 +424,37 @@
 }
 
 #' @keywords internal
-.optimal_merge_beta <- function(vox1, vox2, beta1, beta2, j, env) {
-  vox_m   <- c(vox1, vox2)
-  xtx_jj  <- env$XTX_p1[j, j]
-  xtx_m   <- length(vox_m) * xtx_jj
-  if (xtx_m < 1e-10) return((beta1 + beta2) / 2)
+.optimal_merge_beta <- function(vox1, vox2, beta1, beta2, betahat, j, env) {
+  vox_m <- c(vox1, vox2)
+  if (length(vox_m) == 0L) return((beta1 + beta2) / 2)
 
-  xtxb_m <- sum(env$XTXB[vox_m, j])
-  xty_m  <- sum(env$XTY_tilde[j, vox_m])
-  self   <- xtx_jj * (length(vox1) * beta1 + length(vox2) * beta2)
+  mean_beta <- mean(c(beta1, beta2))
+  temp_betahat <- betahat
+  temp_betahat[vox_m] <- mean_beta
+  region_neighbors <- .get_region_neighbors(vox_m, env)
 
-  (xty_m - xtxb_m + self) / xtx_m
+  bq <- .bracket_quadratic_setup(
+    region_voxels    = vox_m,
+    region_size      = length(vox_m),
+    region_beta      = mean_beta,
+    region_neighbors = region_neighbors,
+    betahat          = temp_betahat,
+    which_beta       = j,
+    XTXB_local       = .xtxb_with_current_beta(j, temp_betahat, env),
+    env              = env
+  )
+
+  b_flat <- c(bq[[2]][, 1L], bq[[2]][, 2L])
+  beta_new <- mean_beta + bracket_quadratic(bq[[1]], b = b_flat)$par
+  if (abs(beta_new) < 1e-4) beta_new <- 0
+  beta_new
 }
 
 #' @keywords internal
-.xtxb_from_betahat <- function(j, betahat, env) {
-  xj <- env$XTX_p1[j, j]
-  out <- matrix(0, nrow = env$V, ncol = env$p1)
-  out[, j] <- xj * betahat
-  out
+.xtxb_with_current_beta <- function(j, betahat_j, env) {
+  betahat_mat <- t(env$alphahat_full[env$p1_index, , drop = FALSE])
+  betahat_mat[, j] <- betahat_j
+  betahat_mat %*% env$XTX_p1
 }
 
 #' @keywords internal
