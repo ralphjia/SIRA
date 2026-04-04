@@ -410,7 +410,7 @@ sira_batched <- function(Y_files, X, Z,
   env$delta <- if (is.null(delta)) preprocessed$delta else delta
   env$inner_max_ops <- 200L
   env$inner_loss_tol <- if (is.null(inner_loss_tol)) {
-    preprocessed$inner_loss_tol
+    if (is.null(preprocessed$inner_loss_tol)) 1e-7 else preprocessed$inner_loss_tol
   } else {
     inner_loss_tol
   }
