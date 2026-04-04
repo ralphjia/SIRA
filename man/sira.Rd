@@ -17,6 +17,7 @@ sira(
   Psi_star = NULL,
   max_iter = 50L,
   delta = 0.01,
+  inner_loss_tol = NULL,
   verbose = TRUE
 )
 }
@@ -57,7 +58,13 @@ Default \code{50}.}
 \item{delta}{Numeric. Convergence threshold on the Frobenius norm of the
 change in \eqn{\hat\alpha} between iterations. Default \code{0.01}.}
 
-\item{verbose}{Logical. Print progress messages. Default \code{TRUE}.}
+\item{inner_loss_tol}{Optional non-negative numeric. Minimum loss decrease
+required to accept a region operation within a covariate update. If
+\code{NULL}, defaults to \code{1e-7}.}
+
+\item{verbose}{Controls progress output. Use \code{FALSE} for silent mode,
+\code{TRUE} for iteration-level progress, or \code{"ops"} for detailed
+region-operation logging.}
 }
 \value{
 An object of class \code{"sira"} containing:

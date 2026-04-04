@@ -18,7 +18,8 @@ sira_batched_fit(
 \item{mu}{Non-negative numeric. L1 sparsity penalty.}
 \item{max_iter}{Integer. Maximum outer coordinate-descent iterations.}
 \item{delta}{Optional numeric. Overrides the stored convergence threshold.}
-\item{verbose}{Optional logical. Overrides the stored verbosity flag.}
+\item{verbose}{Optional verbosity setting. Overrides the stored setting from
+\code{preprocessed}. Use \code{FALSE}, \code{TRUE}, or \code{"ops"}.}
 }
 \value{
 An object of class \code{"sira"}.

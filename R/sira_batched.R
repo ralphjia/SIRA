@@ -27,6 +27,9 @@
 #'   effects basis. If \code{NULL}, SIRA computes it internally.
 #' @param delta Numeric. Convergence threshold carried forward to fitting
 #'   helpers. Default \code{0.01}.
+#' @param inner_loss_tol Optional non-negative numeric. Minimum loss decrease
+#'   required to accept a region operation within a covariate update. If
+#'   \code{NULL}, defaults to \code{1e-7}.
 #' @param verbose Controls progress output. Use \code{FALSE} for silent mode,
 #'   \code{TRUE} for iteration-level progress, or \code{"ops"} for detailed
 #'   region-operation logging.
@@ -55,6 +58,7 @@ sira_batched_preprocess <- function(Y_files, X, Z,
                                     Y_reader = readRDS,
                                     Psi_star = NULL,
                                     delta    = 0.01,
+                                    inner_loss_tol = NULL,
                                     verbose  = TRUE) {
 
   meta <- .sira_prepare_batched_inputs(
@@ -68,6 +72,7 @@ sira_batched_preprocess <- function(Y_files, X, Z,
     Y_reader = Y_reader,
     Psi_star = Psi_star,
     delta = delta,
+    inner_loss_tol = inner_loss_tol,
     verbose = verbose
   )
 
@@ -98,6 +103,7 @@ sira_batched_preprocess <- function(Y_files, X, Z,
     dims = if (meta$use_grid) c(d1 = env$d1, d2 = env$d2, d3 = env$d3) else NULL,
     coords = env$coords,
     delta = env$delta,
+    inner_loss_tol = env$inner_loss_tol,
     verbose = env$verbose,
     verbose_ops = isTRUE(env$verbose_ops),
     Psi_star = env$Psi_star,
@@ -139,6 +145,9 @@ sira_batched_preprocess <- function(Y_files, X, Z,
 #'   Default \code{50}.
 #' @param delta Optional numeric. Overrides the stored convergence threshold.
 #'   Default \code{NULL}, meaning use the value stored in \code{preprocessed}.
+#' @param inner_loss_tol Optional non-negative numeric. Overrides the stored
+#'   minimum accepted loss decrease. If \code{NULL}, uses the value stored in
+#'   \code{preprocessed}.
 #' @param verbose Optional verbosity setting. Overrides the stored setting from
 #'   \code{preprocessed}. Use \code{FALSE}, \code{TRUE}, or \code{"ops"}.
 #'
@@ -148,6 +157,7 @@ sira_batched_preprocess <- function(Y_files, X, Z,
 sira_batched_fit <- function(preprocessed, lambda, mu,
                              max_iter = 50L,
                              delta    = NULL,
+                             inner_loss_tol = NULL,
                              verbose  = NULL) {
   if (!inherits(preprocessed, "sira_batched_preprocessed"))
     stop("preprocessed must be a 'sira_batched_preprocessed' object.")
@@ -160,6 +170,7 @@ sira_batched_fit <- function(preprocessed, lambda, mu,
     lambda = lambda,
     mu = mu,
     delta = delta,
+    inner_loss_tol = inner_loss_tol,
     verbose = verbose
   )
 
@@ -251,6 +262,7 @@ sira_batched <- function(Y_files, X, Z,
                          Psi_star = NULL,
                          max_iter = 50L,
                          delta    = 0.01,
+                         inner_loss_tol = NULL,
                          verbose  = TRUE) {
   prep <- sira_batched_preprocess(
     Y_files = Y_files,
@@ -263,6 +275,7 @@ sira_batched <- function(Y_files, X, Z,
     Y_reader = Y_reader,
     Psi_star = Psi_star,
     delta = delta,
+    inner_loss_tol = inner_loss_tol,
     verbose = verbose
   )
 
@@ -272,6 +285,7 @@ sira_batched <- function(Y_files, X, Z,
     mu = mu,
     max_iter = max_iter,
     delta = delta,
+    inner_loss_tol = inner_loss_tol,
     verbose = verbose
   )
 }
@@ -288,6 +302,7 @@ sira_batched <- function(Y_files, X, Z,
                                          Y_reader = readRDS,
                                          Psi_star = NULL,
                                          delta    = 0.01,
+                                         inner_loss_tol = NULL,
                                          verbose  = TRUE) {
   if (!is.character(Y_files) || length(Y_files) == 0L)
     stop("Y_files must be a non-empty character vector of file paths.")
@@ -343,6 +358,12 @@ sira_batched <- function(Y_files, X, Z,
   env$n  <- n;   env$V  <- V
   env$p1 <- p1;  env$p2 <- p2
   env$delta   <- delta
+  env$inner_max_ops <- 200L
+  env$inner_loss_tol <- if (is.null(inner_loss_tol)) 1e-7 else inner_loss_tol
+  if (!is.numeric(env$inner_loss_tol) || length(env$inner_loss_tol) != 1L ||
+      !is.finite(env$inner_loss_tol) || env$inner_loss_tol < 0) {
+    stop("inner_loss_tol must be NULL or a single non-negative finite number.")
+  }
   .sira_set_verbose_flags(env, verbose)
   env$X  <- X;   env$Z  <- Z
 
@@ -369,7 +390,9 @@ sira_batched <- function(Y_files, X, Z,
 
 #' @keywords internal
 .sira_env_from_preprocessed <- function(preprocessed, lambda, mu,
-                                        delta = NULL, verbose = NULL) {
+                                        delta = NULL,
+                                        inner_loss_tol = NULL,
+                                        verbose = NULL) {
   env <- new.env(parent = emptyenv())
 
   env$n <- preprocessed$n
@@ -385,6 +408,16 @@ sira_batched <- function(Y_files, X, Z,
   env$lambda <- lambda
   env$mu <- mu
   env$delta <- if (is.null(delta)) preprocessed$delta else delta
+  env$inner_max_ops <- 200L
+  env$inner_loss_tol <- if (is.null(inner_loss_tol)) {
+    preprocessed$inner_loss_tol
+  } else {
+    inner_loss_tol
+  }
+  if (!is.numeric(env$inner_loss_tol) || length(env$inner_loss_tol) != 1L ||
+      !is.finite(env$inner_loss_tol) || env$inner_loss_tol < 0) {
+    stop("inner_loss_tol must be NULL or a single non-negative finite number.")
+  }
   .sira_set_verbose_flags(
     env,
     if (is.null(verbose)) {

@@ -27,12 +27,22 @@
   inner_iter <- 0L
 
   while (updated) {
+    if (inner_iter >= env$inner_max_ops) {
+      if (isTRUE(env$verbose)) {
+        message(sprintf(
+          "[SIRA] X%d hit inner operation cap (%d).",
+          j, env$inner_max_ops
+        ))
+      }
+      break
+    }
+
     updated <- FALSE
     betahat <- as.numeric(env$alphahat_full[j, ])
 
     best_op <- .sira_find_best_operation(j, region_list, betahat, env)
     if (!is.null(best_op) && is.finite(best_op$loss_diff) &&
-        best_op$loss_diff < -1e-10) {
+        best_op$loss_diff < -env$inner_loss_tol) {
       if (isTRUE(env$verbose_ops)) .sira_log_operation(j, best_op)
       region_list <- .sira_apply_operation(j, region_list, best_op, env)
       region_list <- .clean_zero_regions(region_list)
@@ -52,6 +62,12 @@
       }
 
       updated <- TRUE
+    } else if (!is.null(best_op) && is.finite(best_op$loss_diff) &&
+               isTRUE(env$verbose) && best_op$loss_diff < 0) {
+      message(sprintf(
+        "[SIRA] X%d stopping inner loop: best loss decrease %.6g is below inner_loss_tol = %.6g.",
+        j, -best_op$loss_diff, env$inner_loss_tol
+      ))
     }
   }
 

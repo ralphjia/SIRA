@@ -28,7 +28,9 @@ sira_batched_preprocess(
 \item{Y_reader}{Function with signature \code{function(path) -> matrix}. Default is \code{readRDS}.}
 \item{Psi_star}{Optional \eqn{L \times V} numeric matrix. Spatial individual effects basis. If \code{NULL}, SIRA computes it internally.}
 \item{delta}{Numeric. Convergence threshold carried forward to fitting helpers.}
-\item{verbose}{Logical. Print progress messages.}
+\item{verbose}{Controls progress output. Use \code{FALSE} for silent mode,
+\code{TRUE} for iteration-level progress, or \code{"ops"} for detailed
+region-operation logging.}
 }
 \value{
 An object of class \code{"sira_batched_preprocessed"} containing reusable

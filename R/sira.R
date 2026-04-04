@@ -52,6 +52,9 @@
 #'   Default \code{50}.
 #' @param delta Numeric. Convergence threshold on the Frobenius norm of the
 #'   change in \eqn{\hat\alpha} between iterations. Default \code{0.01}.
+#' @param inner_loss_tol Optional non-negative numeric. Minimum loss decrease
+#'   required to accept a region operation within a covariate update. If
+#'   \code{NULL}, defaults to \code{1e-7}.
 #' @param verbose Controls progress output. Use \code{FALSE} for silent mode,
 #'   \code{TRUE} for iteration-level progress, or \code{"ops"} for detailed
 #'   region-operation logging.
@@ -110,6 +113,7 @@ sira <- function(Y, X, Z,
                  Psi_star = NULL,
                  max_iter = 50L,
                  delta    = 0.01,
+                 inner_loss_tol = NULL,
                  verbose  = TRUE) {
 
   # ---- 1. Coerce and validate inputs ------------------------------------
@@ -168,6 +172,12 @@ sira <- function(Y, X, Z,
   env$lambda  <- lambda
   env$mu      <- mu
   env$delta   <- delta
+  env$inner_max_ops <- 200L
+  env$inner_loss_tol <- if (is.null(inner_loss_tol)) 1e-7 else inner_loss_tol
+  if (!is.numeric(env$inner_loss_tol) || length(env$inner_loss_tol) != 1L ||
+      !is.finite(env$inner_loss_tol) || env$inner_loss_tol < 0) {
+    stop("inner_loss_tol must be NULL or a single non-negative finite number.")
+  }
   .sira_set_verbose_flags(env, verbose)
 
   # Partition column indices: rows 1:p1 are beta (interest),
