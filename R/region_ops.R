@@ -33,22 +33,37 @@
     best_op <- .sira_find_best_operation(j, region_list, betahat, env)
     if (!is.null(best_op) && is.finite(best_op$loss_diff) &&
         best_op$loss_diff < -1e-10) {
+      if (isTRUE(env$verbose_ops)) .sira_log_operation(j, best_op)
       region_list <- .sira_apply_operation(j, region_list, best_op, env)
       region_list <- .clean_zero_regions(region_list)
       region_list <- .sort_regions_by_beta(region_list)
       inner_iter <- inner_iter + 1L
 
       if (inner_iter %% 5L == 0L) {
+        before_merge <- length(region_list)
         region_list <- .merge_duplicate_regions(region_list, digits = 3L)
         region_list <- .sort_regions_by_beta(region_list)
+        if (isTRUE(env$verbose_ops) && length(region_list) < before_merge) {
+          message(sprintf(
+            "[SIRA-ops] X%d duplicate-merge: %d -> %d regions after rounding betas",
+            j, before_merge, length(region_list)
+          ))
+        }
       }
 
       updated <- TRUE
     }
   }
 
+  before_merge <- length(region_list)
   region_list <- .merge_duplicate_regions(region_list, digits = 3L)
   region_list <- .sort_regions_by_beta(region_list)
+  if (isTRUE(env$verbose_ops) && length(region_list) < before_merge) {
+    message(sprintf(
+      "[SIRA-ops] X%d duplicate-merge: %d -> %d regions after rounding betas",
+      j, before_merge, length(region_list)
+    ))
+  }
 
   region_list
 }
@@ -131,6 +146,7 @@
 .sira_best_expand_candidate <- function(j, region_list, betahat, env) {
   best     <- NULL
   occupied <- .voxels_in_regions(region_list)
+  if (length(occupied) > 0.2 * env$V) return(NULL)
 
   for (k in seq_along(region_list)) {
     vox    <- region_list[[k]][[1]]
@@ -427,4 +443,53 @@
   out <- matrix(0, nrow = env$V, ncol = env$p1)
   out[, j] <- xj * betahat
   out
+}
+
+#' @keywords internal
+.sira_log_operation <- function(j, op) {
+  prefix <- sprintf("[SIRA-ops] X%d", j)
+
+  if (identical(op$type, "revalue")) {
+    message(sprintf(
+      "%s revalue: region=%d size=%d beta=%.6f loss_diff=%.6g",
+      prefix, op$k, length(op$vox), op$beta_new, op$loss_diff
+    ))
+    return(invisible(NULL))
+  }
+
+  if (identical(op$type, "expand")) {
+    message(sprintf(
+      "%s expand: region=%d voxel=%d beta=%.6f loss_diff=%.6g",
+      prefix, op$k, op$vox, op$beta_new, op$loss_diff
+    ))
+    return(invisible(NULL))
+  }
+
+  if (identical(op$type, "shrink")) {
+    message(sprintf(
+      "%s shrink: region=%d voxel=%d loss_diff=%.6g",
+      prefix, op$k, op$vox, op$loss_diff
+    ))
+    return(invisible(NULL))
+  }
+
+  if (identical(op$type, "merge")) {
+    message(sprintf(
+      "%s merge: regions=(%d,%d) sizes=(%d,%d) beta=%.6f loss_diff=%.6g",
+      prefix, op$k1, op$k2, length(op$vox1), length(op$vox2),
+      op$beta_new, op$loss_diff
+    ))
+    return(invisible(NULL))
+  }
+
+  if (identical(op$type, "split")) {
+    message(sprintf(
+      "%s split: region=%d sizes=(%d,%d) betas=(%.6f, %.6f) loss_diff=%.6g",
+      prefix, op$k, length(op$sub1), length(op$sub2),
+      op$b1, op$b2, op$loss_diff
+    ))
+    return(invisible(NULL))
+  }
+
+  invisible(NULL)
 }

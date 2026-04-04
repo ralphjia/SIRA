@@ -27,7 +27,9 @@
 #'   effects basis. If \code{NULL}, SIRA computes it internally.
 #' @param delta Numeric. Convergence threshold carried forward to fitting
 #'   helpers. Default \code{0.01}.
-#' @param verbose Logical. Print progress messages. Default \code{TRUE}.
+#' @param verbose Controls progress output. Use \code{FALSE} for silent mode,
+#'   \code{TRUE} for iteration-level progress, or \code{"ops"} for detailed
+#'   region-operation logging.
 #'
 #' @return An object of class \code{"sira_batched_preprocessed"} containing
 #'   the reusable summaries and metadata required by
@@ -97,6 +99,7 @@ sira_batched_preprocess <- function(Y_files, X, Z,
     coords = env$coords,
     delta = env$delta,
     verbose = env$verbose,
+    verbose_ops = isTRUE(env$verbose_ops),
     Psi_star = env$Psi_star,
     Lambda = env$Lambda,
     L = env$L,
@@ -136,8 +139,8 @@ sira_batched_preprocess <- function(Y_files, X, Z,
 #'   Default \code{50}.
 #' @param delta Optional numeric. Overrides the stored convergence threshold.
 #'   Default \code{NULL}, meaning use the value stored in \code{preprocessed}.
-#' @param verbose Optional logical. Overrides the stored verbosity flag.
-#'   Default \code{NULL}, meaning use the value stored in \code{preprocessed}.
+#' @param verbose Optional verbosity setting. Overrides the stored setting from
+#'   \code{preprocessed}. Use \code{FALSE}, \code{TRUE}, or \code{"ops"}.
 #'
 #' @return An object of class \code{"sira"}.
 #'
@@ -340,7 +343,7 @@ sira_batched <- function(Y_files, X, Z,
   env$n  <- n;   env$V  <- V
   env$p1 <- p1;  env$p2 <- p2
   env$delta   <- delta
-  env$verbose <- isTRUE(verbose)
+  .sira_set_verbose_flags(env, verbose)
   env$X  <- X;   env$Z  <- Z
 
   if (use_grid) {
@@ -382,7 +385,14 @@ sira_batched <- function(Y_files, X, Z,
   env$lambda <- lambda
   env$mu <- mu
   env$delta <- if (is.null(delta)) preprocessed$delta else delta
-  env$verbose <- if (is.null(verbose)) isTRUE(preprocessed$verbose) else isTRUE(verbose)
+  .sira_set_verbose_flags(
+    env,
+    if (is.null(verbose)) {
+      if (isTRUE(preprocessed$verbose_ops)) "ops" else preprocessed$verbose
+    } else {
+      verbose
+    }
+  )
   env$p1_index <- seq_len(env$p1)
   env$p2_index <- env$p1 + seq_len(env$p2)
   env$Psi_star <- preprocessed$Psi_star

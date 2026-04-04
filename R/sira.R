@@ -52,7 +52,9 @@
 #'   Default \code{50}.
 #' @param delta Numeric. Convergence threshold on the Frobenius norm of the
 #'   change in \eqn{\hat\alpha} between iterations. Default \code{0.01}.
-#' @param verbose Logical. Print progress messages. Default \code{TRUE}.
+#' @param verbose Controls progress output. Use \code{FALSE} for silent mode,
+#'   \code{TRUE} for iteration-level progress, or \code{"ops"} for detailed
+#'   region-operation logging.
 #'
 #' @return An object of class \code{"sira"} containing:
 #' \describe{
@@ -166,7 +168,7 @@ sira <- function(Y, X, Z,
   env$lambda  <- lambda
   env$mu      <- mu
   env$delta   <- delta
-  env$verbose <- isTRUE(verbose)
+  .sira_set_verbose_flags(env, verbose)
 
   # Partition column indices: rows 1:p1 are beta (interest),
   # rows (p1+1):(p1+p2) are gamma (confounders).
@@ -356,6 +358,30 @@ sira <- function(Y, X, Z,
   env$XTY -
     env$XTZ %*% env$gammahat -
     crossprod(env$X, env$thetahat) %*% env$Psi_star
+}
+
+#' @keywords internal
+.sira_set_verbose_flags <- function(env, verbose) {
+  if (is.logical(verbose)) {
+    env$verbose <- isTRUE(verbose)
+    env$verbose_ops <- FALSE
+    return(invisible(NULL))
+  }
+
+  if (is.numeric(verbose) && length(verbose) == 1L) {
+    env$verbose <- verbose >= 1
+    env$verbose_ops <- verbose >= 2
+    return(invisible(NULL))
+  }
+
+  if (is.character(verbose) && length(verbose) == 1L) {
+    key <- tolower(verbose)
+    env$verbose <- key %in% c("true", "yes", "all", "ops", "detail", "detailed")
+    env$verbose_ops <- key %in% c("ops", "all", "detail", "detailed")
+    return(invisible(NULL))
+  }
+
+  stop("verbose must be FALSE, TRUE, a numeric level, or 'ops'.")
 }
 
 
