@@ -101,7 +101,7 @@
 #' }
 #'
 #' @seealso \code{\link{coef.sira}}, \code{\link{print.sira}},
-#'   \code{\link{summary.sira}}
+#'   \code{\link{summary.sira}}, \code{\link{bic_sira}}
 #'
 #' @importFrom Matrix Matrix sparseMatrix
 #' @importFrom locfdr locfdr
@@ -248,6 +248,8 @@ sira <- function(Y, X, Z,
     list(
       betahat     = betahat,
       gammahat    = gammahat,
+      thetahat    = env$thetahat,
+      Psi_star    = env$Psi_star,
       region_list = result$region_list_full,
       convergence = result$convergence,
       lambda      = lambda,
@@ -484,4 +486,112 @@ as.array.sira <- function(x, j = 1L, type = c("beta", "gamma"), ...) {
   mat  <- stats::coef(x, type = match.arg(type))
   vec  <- mat[j, ]
   array(vec, dim = x$dims)
+}
+
+#' Compute the boundary-voxel BIC for a SIRA fit
+#'
+#' Computes the Bayesian Information Criterion (BIC) for a fitted
+#' \code{"sira"} object using the degrees-of-freedom definition from the
+#' SIRA paper, where the effective model size is the total number of boundary
+#' voxels across the covariates of interest.
+#'
+#' The criterion is
+#' \deqn{\mathrm{BIC} = \log(nV)\,\mathrm{df} + nV\log(\mathrm{MSE}),}
+#' where \eqn{\mathrm{df}} is the number of boundary voxels and
+#' \eqn{\mathrm{MSE}} is computed from the fitted mean
+#' \eqn{X\hat\beta + Z\hat\gamma + \hat\theta\Psi^\ast}. This matches the
+#' boundary-voxel BIC definition in the SIRA paper.
+#'
+#' @param object A \code{"sira"} object.
+#' @param Y An \eqn{n \times V} numeric matrix of image outcomes.
+#' @param X An \eqn{n \times p_1} numeric matrix of covariates of interest.
+#' @param Z An \eqn{n \times p_2} numeric matrix of confounders.
+#' @param ... Ignored.
+#'
+#' @return A named numeric vector containing:
+#' \describe{
+#'   \item{\code{BIC}}{Boundary-voxel BIC value.}
+#'   \item{\code{MSE}}{Mean squared error used in the criterion.}
+#'   \item{\code{boundary_voxels}}{Total number of boundary voxels across
+#'     covariates of interest.}
+#' }
+#'
+#' @export
+bic_sira <- function(object, Y, X, Z, ...) {
+  if (!inherits(object, "sira"))
+    stop("object must be a 'sira' fit.")
+
+  if (!is.matrix(Y)) Y <- as.matrix(Y)
+  if (!is.matrix(X)) X <- as.matrix(X)
+  if (!is.matrix(Z)) Z <- as.matrix(Z)
+  storage.mode(Y) <- "double"
+  storage.mode(X) <- "double"
+  storage.mode(Z) <- "double"
+
+  if (nrow(Y) != object$n)
+    stop("Y must have nrow(Y) = ", object$n, ".")
+  if (ncol(Y) != object$V)
+    stop("Y must have ncol(Y) = ", object$V, ".")
+  if (nrow(X) != object$n || ncol(X) != nrow(object$betahat))
+    stop("X must have dimensions ", object$n, " x ", nrow(object$betahat), ".")
+  if (nrow(Z) != object$n || ncol(Z) != nrow(object$gammahat))
+    stop("Z must have dimensions ", object$n, " x ", nrow(object$gammahat), ".")
+  if (is.null(object$thetahat) || is.null(object$Psi_star))
+    stop("object does not contain the subject-specific random-effect term. ",
+         "Refit with a current version of SIRA to use bic_sira().")
+
+  neighbor_list <- .sira_neighbor_list_from_fit(object)
+  boundary_voxels <- .sira_boundary_voxel_count(object$region_list, neighbor_list)
+
+  fitted_mean <- X %*% object$betahat +
+    Z %*% object$gammahat +
+    object$thetahat %*% object$Psi_star
+  mse <- mean((Y - fitted_mean)^2)
+  bic <- log(object$n * object$V) * boundary_voxels + object$n * object$V * log(mse)
+
+  c(BIC = bic, MSE = mse, boundary_voxels = boundary_voxels)
+}
+
+#' @keywords internal
+.sira_neighbor_list_from_fit <- function(object) {
+  env <- new.env(parent = emptyenv())
+  env$V <- object$V
+  env$verbose <- FALSE
+
+  if (!is.null(object$coords)) {
+    env$coords <- object$coords
+  } else if (!is.null(object$dims)) {
+    env$d1 <- as.integer(object$dims["d1"])
+    env$d2 <- as.integer(object$dims["d2"])
+    env$d3 <- as.integer(object$dims["d3"])
+    env$coords <- NULL
+  } else {
+    stop("Fit does not contain enough geometry information to build neighbors.")
+  }
+
+  .sira_build_neighbors(env)
+  env$neighbor_list
+}
+
+#' @keywords internal
+.sira_boundary_voxel_count <- function(region_list_full, neighbor_list) {
+  total <- 0L
+
+  for (region_list in region_list_full) {
+    active_voxels <- .voxels_in_regions(region_list)
+    if (length(active_voxels) == 0L) next
+
+    for (region in region_list) {
+      region_voxels <- region[[1L]]
+      if (length(region_voxels) == 0L) next
+
+      for (v in region_voxels) {
+        if (any(!(neighbor_list[[v]] %in% active_voxels))) {
+          total <- total + 1L
+        }
+      }
+    }
+  }
+
+  total
 }

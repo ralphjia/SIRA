@@ -208,6 +208,8 @@ sira_batched_fit <- function(preprocessed, lambda, mu,
     list(
       betahat     = betahat,
       gammahat    = gammahat,
+      thetahat    = env$thetahat,
+      Psi_star    = env$Psi_star,
       region_list = result$region_list_full,
       convergence = result$convergence,
       lambda      = lambda,
