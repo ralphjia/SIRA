@@ -349,6 +349,7 @@ bic_sira_batched <- function(object, Y_files, X, Z,
 
   neighbor_list <- .sira_neighbor_list_from_fit(object)
   boundary_voxels <- .sira_boundary_voxel_count(object$region_list, neighbor_list)
+  n_obs <- as.double(object$n) * as.double(object$V)
 
   rss <- 0
   row_start <- 1L
@@ -380,8 +381,8 @@ bic_sira_batched <- function(object, Y_files, X, Z,
   if (row_start - 1L != object$n)
     stop("Batch files contain ", row_start - 1L, " rows total but nrow(X) = ", object$n, ".")
 
-  mse <- rss / (object$n * object$V)
-  bic <- log(object$n * object$V) * boundary_voxels + object$n * object$V * log(mse)
+  mse <- rss / n_obs
+  bic <- log(n_obs) * boundary_voxels + n_obs * log(mse)
 
   c(BIC = bic, MSE = mse, boundary_voxels = boundary_voxels)
 }

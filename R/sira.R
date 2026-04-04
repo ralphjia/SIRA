@@ -542,12 +542,13 @@ bic_sira <- function(object, Y, X, Z, ...) {
 
   neighbor_list <- .sira_neighbor_list_from_fit(object)
   boundary_voxels <- .sira_boundary_voxel_count(object$region_list, neighbor_list)
+  n_obs <- as.double(object$n) * as.double(object$V)
 
   fitted_mean <- X %*% object$betahat +
     Z %*% object$gammahat +
     object$thetahat %*% object$Psi_star
   mse <- mean((Y - fitted_mean)^2)
-  bic <- log(object$n * object$V) * boundary_voxels + object$n * object$V * log(mse)
+  bic <- log(n_obs) * boundary_voxels + n_obs * log(mse)
 
   c(BIC = bic, MSE = mse, boundary_voxels = boundary_voxels)
 }
