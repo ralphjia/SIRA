@@ -293,6 +293,100 @@ sira_batched <- function(Y_files, X, Z,
 }
 
 
+#' Compute the boundary-voxel BIC for a batched SIRA fit
+#'
+#' Computes the Bayesian Information Criterion (BIC) for a fitted
+#' \code{"sira"} object using the degrees-of-freedom definition from the
+#' SIRA paper, where the effective model size is the total number of boundary
+#' voxels across the covariates of interest. Unlike \code{\link{bic_sira}},
+#' this function reads the outcome data from disk in batches and therefore does
+#' not require the full \eqn{n \times V} outcome matrix to be held in memory.
+#'
+#' @param object A \code{"sira"} object, typically returned by
+#'   \code{\link{sira_batched_fit}} or \code{\link{sira_batched}}.
+#' @param Y_files Character vector of file paths. Each file must be readable by
+#'   \code{Y_reader} and return a numeric matrix with \eqn{V} columns.
+#' @param X An \eqn{n \times p_1} numeric matrix of covariates of interest.
+#' @param Z An \eqn{n \times p_2} numeric matrix of confounders.
+#' @param Y_reader Function with signature \code{function(path) -> matrix}.
+#'   Default is \code{readRDS}.
+#' @param ... Ignored.
+#'
+#' @return A named numeric vector containing:
+#' \describe{
+#'   \item{\code{BIC}}{Boundary-voxel BIC value.}
+#'   \item{\code{MSE}}{Mean squared error used in the criterion.}
+#'   \item{\code{boundary_voxels}}{Total number of boundary voxels across
+#'     covariates of interest.}
+#' }
+#'
+#' @export
+bic_sira_batched <- function(object, Y_files, X, Z,
+                             Y_reader = readRDS, ...) {
+  if (!inherits(object, "sira"))
+    stop("object must be a 'sira' fit.")
+  if (is.null(object$thetahat) || is.null(object$Psi_star))
+    stop("object does not contain the subject-specific random-effect term. ",
+         "Refit with a current version of SIRA to use bic_sira_batched().")
+  if (!is.character(Y_files) || length(Y_files) == 0L)
+    stop("Y_files must be a non-empty character vector of file paths.")
+  missing_files <- Y_files[!file.exists(Y_files)]
+  if (length(missing_files) > 0L)
+    stop("The following Y_files do not exist:\n  ",
+         paste(missing_files, collapse = "\n  "))
+  if (!is.function(Y_reader))
+    stop("Y_reader must be a function with signature function(path) -> matrix.")
+
+  if (!is.matrix(X)) X <- as.matrix(X)
+  if (!is.matrix(Z)) Z <- as.matrix(Z)
+  storage.mode(X) <- "double"
+  storage.mode(Z) <- "double"
+
+  if (nrow(X) != object$n || ncol(X) != nrow(object$betahat))
+    stop("X must have dimensions ", object$n, " x ", nrow(object$betahat), ".")
+  if (nrow(Z) != object$n || ncol(Z) != nrow(object$gammahat))
+    stop("Z must have dimensions ", object$n, " x ", nrow(object$gammahat), ".")
+
+  neighbor_list <- .sira_neighbor_list_from_fit(object)
+  boundary_voxels <- .sira_boundary_voxel_count(object$region_list, neighbor_list)
+
+  rss <- 0
+  row_start <- 1L
+
+  for (path in Y_files) {
+    Y_b <- Y_reader(path)
+    if (!is.matrix(Y_b)) Y_b <- as.matrix(Y_b)
+    storage.mode(Y_b) <- "double"
+
+    n_b <- nrow(Y_b)
+    row_end <- row_start + n_b - 1L
+    if (ncol(Y_b) != object$V)
+      stop("Each batch must have ", object$V, " columns.")
+    if (row_end > object$n)
+      stop("Batch files contain more rows than nrow(X).")
+
+    X_b <- X[row_start:row_end, , drop = FALSE]
+    Z_b <- Z[row_start:row_end, , drop = FALSE]
+    theta_b <- object$thetahat[row_start:row_end, , drop = FALSE]
+
+    fitted_b <- X_b %*% object$betahat +
+      Z_b %*% object$gammahat +
+      theta_b %*% object$Psi_star
+
+    rss <- rss + sum((Y_b - fitted_b)^2)
+    row_start <- row_end + 1L
+  }
+
+  if (row_start - 1L != object$n)
+    stop("Batch files contain ", row_start - 1L, " rows total but nrow(X) = ", object$n, ".")
+
+  mse <- rss / (object$n * object$V)
+  bic <- log(object$n * object$V) * boundary_voxels + object$n * object$V * log(mse)
+
+  c(BIC = bic, MSE = mse, boundary_voxels = boundary_voxels)
+}
+
+
 # =============================================================================
 # HELPERS
 # =============================================================================

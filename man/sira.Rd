@@ -134,5 +134,5 @@ print(fit)
 }
 \seealso{
 \code{\link{coef.sira}}, \code{\link{print.sira}},
-  \code{\link{summary.sira}}
+  \code{\link{summary.sira}}, \code{\link{bic_sira}}
 }

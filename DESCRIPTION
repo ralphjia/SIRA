@@ -1,7 +1,7 @@
 Package: SIRA
 Type: Package
 Title: Scalable Image-on-Scalar Regression Algorithm
-Version: 0.1.1
+Version: 0.2.0
 Authors@R: person("Ralph", "Jiang", email = "ralphjia@umich.edu",
     role = c("aut", "cre"))
 Description: Fits image-on-scalar regression models with spatially homogeneous,
